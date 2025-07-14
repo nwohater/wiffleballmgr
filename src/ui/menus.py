@@ -189,7 +189,10 @@ class MainMenu(BaseMenu):
             velocity=random.randint(30, 70),
             control=random.randint(30, 70),
             stamina=random.randint(30, 70),
-            speed_control=random.randint(30, 70)
+            speed_control=random.randint(30, 70),
+            range=random.randint(40, 80),
+            arm_strength=random.randint(40, 80),
+            accuracy=random.randint(40, 80)
         )
     
     def select_team(self, teams):
@@ -343,11 +346,43 @@ class SeasonMenu(BaseMenu):
     
     def view_team(self):
         """View team information"""
-        team = self.engine.get_game_data("current_team")
-        if team:
-            team_ui = TeamManagementUI()
-            team_ui.show_team_overview(team)
+        teams = self.engine.get_game_data("teams")
+        
+        if not teams:
+            self.console.print("[red]No teams found![/red]")
             Prompt.ask("\nPress Enter to continue")
+            return None
+        
+        team_ui = TeamManagementUI()
+        
+        # Prompt user to select which team to view
+        selected_team = team_ui.select_team_to_view(teams)
+        
+        if selected_team:
+            # Show team overview
+            team_ui.show_team_overview(selected_team)
+            
+            # Show full roster with stats
+            self.console.print("\n")
+            team_ui.show_roster(selected_team, show_reserves=True)
+            
+            # Allow player selection for detailed view
+            while True:
+                selected_player = team_ui.select_player_from_roster(selected_team)
+                
+                if selected_player:
+                    # Show detailed player stats
+                    team_ui.show_player_details(selected_player)
+                    Prompt.ask("\nPress Enter to return to roster")
+                    
+                    # Redisplay roster
+                    team_ui.show_team_overview(selected_team)
+                    self.console.print("\n")
+                    team_ui.show_roster(selected_team, show_reserves=True)
+                else:
+                    # User chose to go back
+                    break
+        
         return None
     
     def play_next_game(self):

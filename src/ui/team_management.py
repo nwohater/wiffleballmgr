@@ -29,12 +29,16 @@ class TeamManagementUI:
         panel = Panel(header, border_style=COLORS["TITLE"])
         self.console.print(panel)
         
-        # Team record
+        # Team record and run differential
         record_text = f"Record: {team.wins}-{team.losses}-{team.ties}"
-        runs_text = f"Runs: {team.runs_scored}-{team.runs_allowed}"
+        runs_text = f"Runs For: {team.runs_scored} | Runs Against: {team.runs_allowed}"
+        
+        # Calculate run differential
+        run_diff = team.runs_scored - team.runs_allowed
+        diff_text = f"Run Differential: {run_diff:+d}"  # + shows positive sign
         
         stats_panel = Panel(
-            f"{record_text}\n{runs_text}",
+            f"{record_text}\n{runs_text}\n{diff_text}",
             title="Season Stats",
             border_style=COLORS["INFO"]
         )
@@ -57,50 +61,70 @@ class TeamManagementUI:
         
         # Create roster table
         table = Table(title=f"{team.name} Roster")
+        table.add_column("#", style=COLORS["SUBTITLE"])
         table.add_column("Name", style=COLORS["HIGHLIGHT"])
         table.add_column("Age", style=COLORS["INFO"])
         table.add_column("V", style=COLORS["INFO"])
         table.add_column("C", style=COLORS["INFO"])
         table.add_column("S", style=COLORS["INFO"])
         table.add_column("SC", style=COLORS["INFO"])
+        table.add_column("R", style=COLORS["SUCCESS"])
+        table.add_column("AS", style=COLORS["SUCCESS"])
+        table.add_column("A", style=COLORS["SUCCESS"])
         table.add_column("AVG", style=COLORS["INFO"])
         table.add_column("ERA", style=COLORS["INFO"])
+        table.add_column("FPCT", style=COLORS["SUCCESS"])
         table.add_column("Status", style=COLORS["SUBTITLE"])
         
         # Add active players
+        player_num = 1
         for player in team.active_roster:
             avg = f"{player.batting_stats.avg:.3f}" if player.batting_stats.ab > 0 else "N/A"
             era = f"{player.pitching_stats.era:.2f}" if player.pitching_stats.ip > 0 else "N/A"
+            fpct = f"{player.fielding_stats.calc_fpct:.3f}" if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0 else "N/A"
             
             table.add_row(
+                str(player_num),
                 player.name,
                 str(player.age),
                 str(player.velocity),
                 str(player.control),
                 str(player.stamina),
                 str(player.speed_control),
+                str(player.range),
+                str(player.arm_strength),
+                str(player.accuracy),
                 avg,
                 era,
+                fpct,
                 "Active"
             )
+            player_num += 1
         
         # Add reserve players if requested
         if show_reserves:
             for player in team.reserve_roster:
                 avg = f"{player.batting_stats.avg:.3f}" if player.batting_stats.ab > 0 else "N/A"
                 era = f"{player.pitching_stats.era:.2f}" if player.pitching_stats.ip > 0 else "N/A"
+                fpct = f"{player.fielding_stats.calc_fpct:.3f}" if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0 else "N/A"
                 
                 table.add_row(
+                    str(player_num),
                     player.name,
                     str(player.age),
                     str(player.velocity),
                     str(player.control),
                     str(player.stamina),
                     str(player.speed_control),
+                    str(player.range),
+                    str(player.arm_strength),
+                    str(player.accuracy),
                     avg,
                     era,
+                    fpct,
                     "Reserve"
                 )
+                player_num += 1
         
         self.console.print(table)
     
@@ -129,6 +153,16 @@ class TeamManagementUI:
             border_style=COLORS["INFO"]
         )
         self.console.print(info_panel)
+        
+        # Fielding attributes
+        fielding_attr_panel = Panel(
+            f"Range: {player.range}\n"
+            f"Arm Strength: {player.arm_strength}\n"
+            f"Accuracy: {player.accuracy}",
+            title="Fielding Attributes",
+            border_style=COLORS["SUCCESS"]
+        )
+        self.console.print(fielding_attr_panel)
         
         # Batting stats
         if player.batting_stats.ab > 0:
@@ -165,6 +199,19 @@ class TeamManagementUI:
                 border_style=COLORS["WARNING"]
             )
             self.console.print(pitching_panel)
+        
+        # Fielding stats
+        if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0:
+            fielding_panel = Panel(
+                f"Putouts: {player.fielding_stats.po}\n"
+                f"Assists: {player.fielding_stats.a}\n"
+                f"Errors: {player.fielding_stats.e}\n"
+                f"Double Plays: {player.fielding_stats.dp}\n"
+                f"Fielding Pct: {player.fielding_stats.calc_fpct:.3f}",
+                title="Fielding Stats",
+                border_style=COLORS["SUCCESS"]
+            )
+            self.console.print(fielding_panel)
     
     def show_league_standings(self, teams: List[Team]):
         """Display league standings"""
@@ -213,6 +260,8 @@ class TeamManagementUI:
             self.show_batting_leaders(all_players)
         elif stat_type == "pitching":
             self.show_pitching_leaders(all_players)
+        elif stat_type == "fielding":
+            self.show_fielding_leaders(all_players)
     
     def show_batting_leaders(self, players: List[Player]):
         """Show batting leaders"""
@@ -280,4 +329,108 @@ class TeamManagementUI:
                 f"{player.pitching_stats.ip:.1f}"
             )
         
-        self.console.print(table) 
+        self.console.print(table)
+    
+    def show_fielding_leaders(self, players: List[Player]):
+        """Show fielding leaders"""
+        # Filter players with fielding chances
+        fielders = [p for p in players if (p.fielding_stats.po + p.fielding_stats.a + p.fielding_stats.e) > 0]
+        
+        if not fielders:
+            self.console.print("No fielding stats available")
+            return
+        
+        # Sort by fielding percentage (minimum 5 chances)
+        fpct_leaders = sorted([p for p in fielders if (p.fielding_stats.po + p.fielding_stats.a + p.fielding_stats.e) >= 5], 
+                             key=lambda p: p.fielding_stats.calc_fpct, reverse=True)[:10]
+        
+        # Display fielding percentage leaders
+        self.console.print(Panel("Fielding Percentage Leaders", style=COLORS["TITLE"]))
+        table = Table()
+        table.add_column("Rank")
+        table.add_column("Player")
+        table.add_column("Team")
+        table.add_column("FPCT")
+        table.add_column("PO")
+        table.add_column("A")
+        table.add_column("E")
+        
+        for i, player in enumerate(fpct_leaders, 1):
+            table.add_row(
+                str(i),
+                player.name,
+                player.team or "FA",
+                f"{player.fielding_stats.calc_fpct:.3f}",
+                str(player.fielding_stats.po),
+                str(player.fielding_stats.a),
+                str(player.fielding_stats.e)
+            )
+        
+        self.console.print(table)
+    
+    def select_team_to_view(self, teams: List[Team]) -> Optional[Team]:
+        """Display team selection interface and return selected team"""
+        self.console.clear()
+        
+        # Display teams in a table
+        table = Table(title="Select Team to View")
+        table.add_column("Number", style=COLORS["HIGHLIGHT"])
+        table.add_column("Team", style=COLORS["TITLE"])
+        table.add_column("Division", style=COLORS["SUBTITLE"])
+        table.add_column("Record", style=COLORS["INFO"])
+        
+        for i, team in enumerate(teams, 1):
+            record = f"{team.wins}-{team.losses}-{team.ties}"
+            table.add_row(
+                str(i),
+                team.name,
+                team.division,
+                record
+            )
+        
+        self.console.print(table)
+        
+        # Get user selection
+        while True:
+            try:
+                choice = Prompt.ask(
+                    f"\nSelect team (1-{len(teams)}) or 'b' to go back",
+                    default="b"
+                )
+                
+                if choice.lower() == 'b':
+                    return None
+                
+                team_num = int(choice)
+                if 1 <= team_num <= len(teams):
+                    return teams[team_num - 1]
+                else:
+                    self.console.print(f"[{COLORS['ERROR']}]Please enter a number between 1 and {len(teams)}[/]")
+            except ValueError:
+                self.console.print(f"[{COLORS['ERROR']}]Please enter a valid number or 'b' to go back[/]")
+    
+    def select_player_from_roster(self, team: Team) -> Optional[Player]:
+        """Allow user to select a player from the team roster for detailed view"""
+        all_players = team.active_roster + team.reserve_roster
+        
+        if not all_players:
+            self.console.print("[red]No players found on this team![/red]")
+            return None
+        
+        while True:
+            try:
+                choice = Prompt.ask(
+                    f"\nSelect player number (1-{len(all_players)}) for details, or 'b' to go back",
+                    default="b"
+                )
+                
+                if choice.lower() == 'b':
+                    return None
+                
+                player_num = int(choice)
+                if 1 <= player_num <= len(all_players):
+                    return all_players[player_num - 1]
+                else:
+                    self.console.print(f"[{COLORS['ERROR']}]Please enter a number between 1 and {len(all_players)}[/]")
+            except ValueError:
+                self.console.print(f"[{COLORS['ERROR']}]Please enter a valid number or 'b' to go back[/]") 

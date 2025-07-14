@@ -91,7 +91,7 @@ class PitchingStats:
     @property
     def era(self) -> float:
         if self.ip > 0:
-            return round((self.er * 6) / self.ip, 2)
+            return round((self.er * 3) / self.ip, 2)  # MLW games are 3 innings
         return 0.0
     @property
     def whip(self) -> float:
@@ -115,7 +115,11 @@ class Player:
     control: int = 50
     stamina: int = 50
     speed_control: int = 50
-    # Batting/fielding attributes can be added here
+    # Fielding attributes
+    range: int = 50
+    arm_strength: int = 50
+    accuracy: int = 50
+    # Batting attributes can be added here
     batting_stats: BattingStats = field(default_factory=BattingStats)
     fielding_stats: FieldingStats = field(default_factory=FieldingStats)
     pitching_stats: PitchingStats = field(default_factory=PitchingStats) 

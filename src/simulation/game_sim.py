@@ -137,6 +137,12 @@ class GameSimulator:
         self.away_lineup = random.sample(self.away_team.active_roster, 
                                        min(5, len(self.away_team.active_roster)))
         
+        # Update batting games played for lineup players
+        for player in self.home_lineup:
+            player.batting_stats.gp += 1
+        for player in self.away_lineup:
+            player.batting_stats.gp += 1
+        
         # Update pitcher stats
         self.current_pitcher_home.pitching_stats.gp += 1
         self.current_pitcher_home.pitching_stats.gs += 1
@@ -170,8 +176,16 @@ class GameSimulator:
             # Simulate at-bat
             if pitcher is not None:
                 at_bat = self.simulate_at_bat(batter, pitcher)
-                # Update stats
-                self.update_stats(at_bat, batter, pitcher)
+                
+                # Calculate runs that will be scored to track RBIs
+                additional_runs = 0
+                if at_bat.outcome == "walk" or at_bat.outcome == "hbp":
+                    additional_runs = self.count_runners_that_will_score(1)
+                elif at_bat.outcome == "hit":
+                    additional_runs = self.count_runners_that_will_score(at_bat.bases_advanced)
+                
+                # Update stats with RBI information
+                self.update_stats(at_bat, batter, pitcher, additional_runs)
             else:
                 # Fallback if no pitcher (shouldn't happen)
                 at_bat = AtBatResult("out", "No pitcher available")
@@ -194,6 +208,13 @@ class GameSimulator:
                 self.outs += 1
             batter_index += 1  # Always move to next batter
             batters_faced += 1
+        
+        # Track runs allowed for pitcher
+        pitcher = self.current_pitcher_away if self.is_home_batting else self.current_pitcher_home
+        if pitcher and runs_scored > 0:
+            pitcher.pitching_stats.r += runs_scored
+            pitcher.pitching_stats.er += runs_scored  # Simplified: all runs are earned
+        
         return runs_scored
     
     def simulate_at_bat(self, batter: Player, pitcher: Player) -> AtBatResult:
@@ -249,7 +270,7 @@ class GameSimulator:
         elif rand < base_walk + base_hbp + base_strikeout:
             return AtBatResult("strikeout", "Strikeout")
         elif rand < base_walk + base_hbp + base_strikeout + base_out:
-            return AtBatResult("out", "Ground out")
+            return self.perform_fielding_check(batter, "ground_ball")
         else:
             return self.determine_hit_type(batter, pitcher)
     
@@ -260,18 +281,34 @@ class GameSimulator:
         
         rand = random.random()
         
-        if rand < 0.05 and power > 0.6:  # 5% chance of HR for power hitters
+        if rand < 0.12 and power > 0.4:  # 12% chance of HR for decent power hitters
             return AtBatResult("hit", "Home run", runs_scored=self.count_runners() + 1, bases_advanced=4)
         elif rand < 0.15:  # 10% chance of triple
-            return AtBatResult("hit", "Triple", bases_advanced=3)
+            # Triples can be caught by outfielders
+            return self.perform_fielding_check(batter, "fly_ball", 
+                                             AtBatResult("hit", "Triple", bases_advanced=3))
         elif rand < 0.35:  # 20% chance of double
-            return AtBatResult("hit", "Double", bases_advanced=2)
+            # Doubles can be fielded
+            return self.perform_fielding_check(batter, "line_drive", 
+                                             AtBatResult("hit", "Double", bases_advanced=2))
         else:  # 60% chance of single
-            return AtBatResult("hit", "Single", bases_advanced=1)
+            # Singles can be fielded
+            return self.perform_fielding_check(batter, "ground_ball", 
+                                             AtBatResult("hit", "Single", bases_advanced=1))
     
     def count_runners(self) -> int:
         """Count runners on base"""
         return sum(1 for base in self.bases if base is not None)
+    
+    def count_runners_that_will_score(self, bases_advanced: int) -> int:
+        """Count how many runners will score based on bases advanced"""
+        runs = 0
+        for i, runner in enumerate(self.bases):
+            if runner is not None:
+                final_base = i + bases_advanced
+                if final_base >= 3:  # Scores if reaches home (base 3+)
+                    runs += 1
+        return runs
     
     def advance_runners(self, bases: int):
         """Advance runners on base and return runs scored"""
@@ -295,7 +332,7 @@ class GameSimulator:
         self.bases = new_bases
         return runs_scored
     
-    def update_stats(self, at_bat: AtBatResult, batter: Player, pitcher: Player):
+    def update_stats(self, at_bat: AtBatResult, batter: Player, pitcher: Player, additional_rbi: int = 0):
         """Update player statistics based on at-bat result"""
         # Update batter stats
         batter.batting_stats.pa += 1
@@ -303,6 +340,8 @@ class GameSimulator:
         if at_bat.outcome == "hit":
             batter.batting_stats.h += 1
             batter.batting_stats.ab += 1
+            # Track RBIs for runs scored (from hit result + additional runners)
+            batter.batting_stats.rbi += at_bat.runs_scored + additional_rbi
             if "single" in at_bat.details.lower():
                 pass  # Single
             elif "double" in at_bat.details.lower():
@@ -313,11 +352,16 @@ class GameSimulator:
                 batter.batting_stats.hr += 1
         elif at_bat.outcome == "walk":
             batter.batting_stats.bb += 1
+            # Track RBIs for walks that drive in runs
+            batter.batting_stats.rbi += additional_rbi
         elif at_bat.outcome == "hbp":
             batter.batting_stats.hbp += 1
+            # Track RBIs for HBP that drive in runs
+            batter.batting_stats.rbi += additional_rbi
         elif at_bat.outcome == "strikeout":
             batter.batting_stats.k += 1
             batter.batting_stats.ab += 1
+            # Strikeouts don't award fielding stats - they're pitcher achievements
         elif at_bat.outcome == "out":
             batter.batting_stats.ab += 1
         
@@ -334,4 +378,92 @@ class GameSimulator:
             pitcher.pitching_stats.k += 1
             pitcher.pitching_stats.st += 1
         else:
-            pitcher.pitching_stats.st += 1 
+            pitcher.pitching_stats.st += 1
+    
+    def perform_fielding_check(self, batter: Player, play_type: str, 
+                              hit_result: Optional[AtBatResult] = None) -> AtBatResult:
+        """Perform a fielding check to determine if defenders make the play"""
+        # Get defensive team
+        fielding_team = self.home_team if not self.is_home_batting else self.away_team
+        
+        # Calculate fielding skill based on play type
+        # For 3-player wiffle ball, use all 3 fielders including pitcher
+        current_pitcher = self.current_pitcher_home if not self.is_home_batting else self.current_pitcher_away
+        non_pitcher_fielders = [p for p in fielding_team.active_roster 
+                               if p != current_pitcher][:2]  # 2 non-pitcher fielders
+        fielders = [current_pitcher] + non_pitcher_fielders  # All 3 defensive players
+        
+        if not fielders:
+            # No fielders available, default outcome
+            return hit_result or AtBatResult("out", "Ground out")
+        
+        # Calculate average fielding skill based on play type
+        if play_type == "ground_ball":
+            # Ground balls favor range and accuracy
+            avg_skill = sum(p.range * 0.6 + p.accuracy * 0.4 for p in fielders) / len(fielders)
+            fielding_chance = 0.3  # 30% of ground balls involve fielding checks
+        elif play_type == "fly_ball":
+            # Fly balls favor range and arm strength
+            avg_skill = sum(p.range * 0.7 + p.arm_strength * 0.3 for p in fielders) / len(fielders)
+            fielding_chance = 0.4  # 40% of fly balls involve fielding checks
+        elif play_type == "line_drive":
+            # Line drives favor range
+            avg_skill = sum(p.range * 0.8 + p.accuracy * 0.2 for p in fielders) / len(fielders)
+            fielding_chance = 0.25  # 25% of line drives involve fielding checks
+        else:
+            avg_skill = sum(p.range + p.accuracy + p.arm_strength for p in fielders) / (len(fielders) * 3)
+            fielding_chance = 0.2
+        
+        # Roll for fielding check
+        if random.random() > fielding_chance:
+            # No fielding check - don't award fielding stats for routine plays
+            # Most outs don't involve impressive fielding that should be tracked
+            return hit_result or AtBatResult("out", "Ground out")
+        
+        # Perform fielding check - higher skill = more likely to make the play
+        fielding_roll = random.randint(1, 100)
+        success_threshold = avg_skill  # 1-100 scale matches our attributes
+        
+        if fielding_roll <= success_threshold:
+            # Successful fielding play
+            fielding_details = {
+                "ground_ball": "fielded by infield",
+                "fly_ball": "caught by outfield", 
+                "line_drive": "snagged on the line"
+            }.get(play_type, "fielded")
+            
+            # Update fielding stats for successful play
+            best_fielder = max(fielders, key=lambda p: getattr(p, 'range', 50))
+            
+            if play_type == "ground_ball" and len(fielders) > 1:
+                # Ground ball - fielder gets assist, another gets putout
+                fielder_with_ball = random.choice(fielders)
+                other_fielders = [f for f in fielders if f != fielder_with_ball]
+                if other_fielders:
+                    receiving_fielder = random.choice(other_fielders)
+                    fielder_with_ball.fielding_stats.a += 1  # Assist for throw
+                    receiving_fielder.fielding_stats.po += 1  # Putout for catch
+                else:
+                    fielder_with_ball.fielding_stats.po += 1  # Unassisted
+            else:
+                # Fly ball or line drive - just a putout
+                best_fielder.fielding_stats.po += 1
+            
+            return AtBatResult("out", f"Out - {fielding_details}")
+        else:
+            # Fielding attempt failed
+            if hit_result:
+                # Hit stands, but maybe advance extra base on error
+                if random.random() < 0.3:  # 30% chance of fielding error
+                    worst_fielder = min(fielders, key=lambda p: getattr(p, 'accuracy', 50))
+                    worst_fielder.fielding_stats.e += 1
+                    
+                    # Advance runners one extra base on error
+                    if hit_result.bases_advanced < 4:
+                        hit_result.bases_advanced += 1
+                        hit_result.details += " (fielding error)"
+                
+                return hit_result
+            else:
+                # Failed to convert potential out to actual out - becomes a single
+                return AtBatResult("hit", "Single on fielding mistake", bases_advanced=1) 

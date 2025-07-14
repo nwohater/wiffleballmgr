@@ -375,6 +375,9 @@ class SeasonSimulator:
                 control=random.randint(30, 50),
                 stamina=random.randint(30, 50),
                 speed_control=random.randint(30, 50),
+                range=random.randint(60, 85),  # Hitters tend to be better fielders
+                arm_strength=random.randint(50, 80),
+                accuracy=random.randint(55, 85),
                 batting_stats=batting
             )
             ratings = f"Bat: H={batting.h}, HR={batting.hr}, BB={batting.bb}, K={batting.k}"
@@ -389,6 +392,9 @@ class SeasonSimulator:
                 control=random.randint(60, 80),
                 stamina=random.randint(60, 80),
                 speed_control=random.randint(60, 80),
+                range=random.randint(40, 65),  # Pitchers are typically weaker fielders
+                arm_strength=random.randint(60, 85),  # But have good arms
+                accuracy=random.randint(45, 70),
                 pitching_stats=pitching
             )
             ratings = f"Pitch: V={rookie.velocity}, C={rookie.control}, K={pitching.k}, BB={pitching.bb}"
@@ -407,6 +413,9 @@ class SeasonSimulator:
                 control=random.randint(50, 70),
                 stamina=random.randint(50, 70),
                 speed_control=random.randint(50, 70),
+                range=random.randint(50, 75),  # Balanced fielding ability
+                arm_strength=random.randint(55, 80),
+                accuracy=random.randint(50, 75),
                 batting_stats=batting,
                 pitching_stats=pitching
             )
