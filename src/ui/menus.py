@@ -353,6 +353,8 @@ class SeasonMenu(BaseMenu):
     def view_team(self):
         """View team information"""
         teams = self.engine.get_game_data("teams")
+        season_sim = self.engine.get_game_data("season_simulator")
+        current_season = season_sim.current_season if season_sim else None
         
         if not teams:
             self.console.print("[red]No teams found![/red]")
@@ -378,7 +380,7 @@ class SeasonMenu(BaseMenu):
                 
                 if selected_player:
                     # Show detailed player stats
-                    team_ui.show_player_details(selected_player)
+                    team_ui.show_player_details(selected_player, current_season)
                     Prompt.ask("\nPress Enter to return to roster")
                     
                     # Redisplay roster

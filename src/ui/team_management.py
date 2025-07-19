@@ -128,7 +128,7 @@ class TeamManagementUI:
         
         self.console.print(table)
     
-    def show_player_details(self, player: Player):
+    def show_player_details(self, player: Player, current_season: Optional[int] = None):
         """Display detailed player information with career stats grid"""
         self.console.clear()
         
@@ -166,32 +166,37 @@ class TeamManagementUI:
         )
         self.console.print(fielding_attr_panel)
         
-        # Show career stats grid if player has played multiple seasons
-        if player.seasons_played and len(player.seasons_played) > 0:
-            self.show_career_stats_grid(player)
+        # Show career stats grid (including current season for rookies)
+        self.show_career_stats_grid(player, current_season)
         
         # Show current season stats if any
         self.show_current_season_stats(player)
     
-    def show_career_stats_grid(self, player: Player):
+    def show_career_stats_grid(self, player: Player, current_season: Optional[int] = None):
         """Display career stats in a season-by-season grid"""
         seasons = player.seasons_played.copy() if player.seasons_played else []
         
-        # Get current season number from game engine if available
-        try:
-            from game.engine import GameEngine
-            # This is a bit of a hack, but we need to get the current season
-            # In a real implementation, this should be passed as a parameter
-            pass
-        except:
-            pass
-        
-        # Add current season to the list if player has current stats
-        current_season_num = max(seasons) + 1 if seasons else 1
+        # Get current season number - use provided value or try to get from game engine
+        if current_season is None:
+            try:
+                from game.engine import GameEngine
+                engine = GameEngine()
+                season_sim = engine.get_game_data("season_simulator")
+                if season_sim:
+                    current_season_num = season_sim.current_season
+                else:
+                    # Fallback: estimate from player's seasons
+                    current_season_num = max(seasons) + 1 if seasons else 1
+            except:
+                # Fallback: estimate from player's seasons
+                current_season_num = max(seasons) + 1 if seasons else 1
+        else:
+            current_season_num = current_season
         has_current_batting = player.batting_stats.ab > 0
         has_current_pitching = player.pitching_stats.ip > 0
         
-        if has_current_batting or has_current_pitching:
+        # For rookies (no completed seasons), always show current season even if no stats yet
+        if not seasons or has_current_batting or has_current_pitching:
             if current_season_num not in seasons:
                 seasons.append(current_season_num)
         
@@ -204,7 +209,7 @@ class TeamManagementUI:
         has_batting_stats = any(
             (player.career_stats.season_batting.get(season, None) and 
              player.career_stats.season_batting[season].ab > 0) or
-            (season == current_season_num and player.batting_stats.ab > 0)
+            (season == current_season_num)  # Always show current season for rookies
             for season in seasons
         )
         
@@ -224,14 +229,15 @@ class TeamManagementUI:
             
             for season in seasons:
                 # Use archived stats for completed seasons, current stats for current season
-                if season == current_season_num and has_current_batting:
+                if season == current_season_num:
                     batting_stats = player.batting_stats
                     season_label = f"Season {season}"
                 else:
                     batting_stats = player.career_stats.season_batting.get(season)
                     season_label = f"Season {season}"
                 
-                if batting_stats and batting_stats.ab > 0:
+                # Show stats if they exist (including zeros for current season)
+                if batting_stats and (batting_stats.ab > 0 or season == current_season_num):
                     batting_table.add_row(
                         season_label,
                         str(batting_stats.gp),
@@ -290,7 +296,7 @@ class TeamManagementUI:
         has_pitching_stats = any(
             (player.career_stats.season_pitching.get(season, None) and 
              player.career_stats.season_pitching[season].ip > 0) or
-            (season == current_season_num and player.pitching_stats.ip > 0)
+            (season == current_season_num)  # Always show current season for rookies
             for season in seasons
         )
         
@@ -309,14 +315,15 @@ class TeamManagementUI:
             
             for season in seasons:
                 # Use archived stats for completed seasons, current stats for current season
-                if season == current_season_num and has_current_pitching:
+                if season == current_season_num:
                     pitching_stats = player.pitching_stats
                     season_label = f"Season {season}"
                 else:
                     pitching_stats = player.career_stats.season_pitching.get(season)
                     season_label = f"Season {season}"
                 
-                if pitching_stats and pitching_stats.ip > 0:
+                # Show stats if they exist (including zeros for current season)
+                if pitching_stats and (pitching_stats.ip > 0 or season == current_season_num):
                     pitching_table.add_row(
                         season_label,
                         str(pitching_stats.gp),
