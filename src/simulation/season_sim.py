@@ -338,8 +338,146 @@ class SeasonSimulator:
             k_leader = max(qualified_pitchers, key=lambda x: x['k'])
             print(f"Strikeout King: {k_leader['player'].name} ({k_leader['team']}) - {k_leader['k']} K")
         
+        # Rookie of the Year Award
+        print("\n🌟 ROOKIE OF THE YEAR 🌟")
+        self.show_rookie_of_year_award(all_players)
+        
         if not qualified_hitters and not qualified_pitchers:
             print("No qualified players for leaderboards")
+
+    def show_rookie_of_year_award(self, all_players: List):
+        """Determine and display the Rookie of the Year award winner"""
+        # Find all rookie players (first season players)
+        rookies = []
+        for player in all_players:
+            # A rookie is someone who has only played in the current season
+            if len(player.seasons_played) == 1:
+                rookies.append(player)
+        
+        if not rookies:
+            print("No eligible rookies this season")
+            return
+        
+        # Calculate rookie value combining hitting and pitching performance
+        rookie_candidates = []
+        for rookie in rookies:
+            value = self.calculate_rookie_value(rookie)
+            if value > 0:  # Only include rookies with meaningful contributions
+                team_name = next((team.name for team in self.teams if rookie in team.get_all_players()), 'Unknown')
+                rookie_candidates.append({
+                    'player': rookie,
+                    'team': team_name,
+                    'value': value,
+                    'hitting_value': self.calculate_hitting_value(rookie),
+                    'pitching_value': self.calculate_pitching_value(rookie)
+                })
+        
+        if not rookie_candidates:
+            print("No qualified rookie candidates this season")
+            return
+        
+        # Sort by total value (highest first)
+        rookie_candidates.sort(key=lambda x: x['value'], reverse=True)
+        
+        # Award winner
+        winner = rookie_candidates[0]
+        print(f"Rookie of the Year: {winner['player'].name} ({winner['team']}) - Value: {winner['value']:.1f}")
+        
+        # Show breakdown
+        if winner['hitting_value'] > 0 and winner['pitching_value'] > 0:
+            print(f"  Two-way player: {winner['hitting_value']:.1f} hitting + {winner['pitching_value']:.1f} pitching")
+        elif winner['hitting_value'] > 0:
+            print(f"  Hitter: {winner['hitting_value']:.1f} offensive value")
+        else:
+            print(f"  Pitcher: {winner['pitching_value']:.1f} pitching value")
+        
+        # Show runner-ups
+        if len(rookie_candidates) > 1:
+            print(f"  Runner-up: {rookie_candidates[1]['player'].name} ({rookie_candidates[1]['team']}) - Value: {rookie_candidates[1]['value']:.1f}")
+        if len(rookie_candidates) > 2:
+            print(f"  3rd place: {rookie_candidates[2]['player'].name} ({rookie_candidates[2]['team']}) - Value: {rookie_candidates[2]['value']:.1f}")
+    
+    def calculate_rookie_value(self, player) -> float:
+        """Calculate overall rookie value combining hitting and pitching"""
+        hitting_value = self.calculate_hitting_value(player)
+        pitching_value = self.calculate_pitching_value(player)
+        return hitting_value + pitching_value
+    
+    def calculate_hitting_value(self, player) -> float:
+        """Calculate hitting value for rookie award"""
+        if not hasattr(player, 'batting_stats') or not player.batting_stats:
+            return 0.0
+        
+        stats = player.batting_stats
+        
+        # Minimum playing time requirement (at least 20 at-bats)
+        if stats.ab < 20:
+            return 0.0
+        
+        # Calculate hitting value based on production
+        avg = stats.avg if stats.ab > 0 else 0.0
+        obp = stats.calc_obp
+        slg = stats.calc_slg
+        
+        # Base value from traditional stats
+        value = 0.0
+        value += avg * 30  # Batting average (0.300 = 9 points)
+        value += obp * 25  # On-base percentage
+        value += slg * 20  # Slugging percentage
+        value += stats.hr * 2  # Home runs (2 points each)
+        value += stats.rbi * 0.5  # RBIs (0.5 points each)
+        value += stats.h * 0.3  # Hits (0.3 points each)
+        
+        # Playing time bonus (rewards regular players)
+        if stats.gp >= 20:
+            value *= 1.2  # 20% bonus for regulars
+        elif stats.gp >= 15:
+            value *= 1.1  # 10% bonus for semi-regulars
+        
+        return max(0.0, value)
+    
+    def calculate_pitching_value(self, player) -> float:
+        """Calculate pitching value for rookie award"""
+        if not hasattr(player, 'pitching_stats') or not player.pitching_stats:
+            return 0.0
+        
+        stats = player.pitching_stats
+        
+        # Minimum playing time requirement (at least 5 games or 10 innings)
+        if stats.gp < 5 and stats.ip < 10:
+            return 0.0
+        
+        # Calculate pitching value based on performance
+        value = 0.0
+        
+        # ERA (lower is better) - scale so 2.00 ERA = 10 points, 4.00 ERA = 5 points
+        if stats.ip > 0:
+            era = stats.era
+            era_value = max(0, 15 - era * 2.5)  # 15 points for 0.00 ERA, decreasing
+            value += era_value
+        
+        # Wins and strikeouts
+        value += stats.w * 3  # 3 points per win
+        value += stats.k * 0.2  # 0.2 points per strikeout
+        
+        # WHIP (walks + hits per inning) - lower is better
+        if stats.ip > 0:
+            whip = stats.whip
+            whip_value = max(0, 5 - whip * 2)  # 5 points for 0.00 WHIP, decreasing
+            value += whip_value
+        
+        # Innings pitched (durability)
+        value += stats.ip * 0.1  # 0.1 points per inning
+        
+        # Usage bonus
+        if stats.gp >= 15:
+            value *= 1.3  # 30% bonus for workhorses
+        elif stats.gp >= 10:
+            value *= 1.2  # 20% bonus for regular starters
+        elif stats.gp >= 5:
+            value *= 1.1  # 10% bonus for part-time starters
+        
+        return max(0.0, value)
 
     def conduct_rookie_draft(self, rounds: int = 2):
         """Conduct a rookie draft with the lowest-ranked teams picking first. Rookies can be hitter-only, pitcher-only, or two-way."""
