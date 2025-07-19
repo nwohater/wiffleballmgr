@@ -129,7 +129,7 @@ class TeamManagementUI:
         self.console.print(table)
     
     def show_player_details(self, player: Player):
-        """Display detailed player information"""
+        """Display detailed player information with career stats grid"""
         self.console.clear()
         
         # Player header
@@ -142,14 +142,16 @@ class TeamManagementUI:
         self.console.print(panel)
         
         # Basic info
+        seasons_played = len(player.seasons_played) if player.seasons_played else 0
         info_panel = Panel(
             f"Age: {player.age}\n"
+            f"Seasons Played: {seasons_played}\n"
             f"Retired: {'Yes' if player.retired else 'No'}\n"
             f"Velocity: {player.velocity}\n"
             f"Control: {player.control}\n"
             f"Stamina: {player.stamina}\n"
             f"Speed Control: {player.speed_control}",
-            title="Attributes",
+            title="Player Info",
             border_style=COLORS["INFO"]
         )
         self.console.print(info_panel)
@@ -164,25 +166,230 @@ class TeamManagementUI:
         )
         self.console.print(fielding_attr_panel)
         
-        # Batting stats
+        # Show career stats grid if player has played multiple seasons
+        if player.seasons_played and len(player.seasons_played) > 0:
+            self.show_career_stats_grid(player)
+        
+        # Show current season stats if any
+        self.show_current_season_stats(player)
+    
+    def show_career_stats_grid(self, player: Player):
+        """Display career stats in a season-by-season grid"""
+        seasons = player.seasons_played.copy() if player.seasons_played else []
+        
+        # Get current season number from game engine if available
+        try:
+            from game.engine import GameEngine
+            # This is a bit of a hack, but we need to get the current season
+            # In a real implementation, this should be passed as a parameter
+            pass
+        except:
+            pass
+        
+        # Add current season to the list if player has current stats
+        current_season_num = max(seasons) + 1 if seasons else 1
+        has_current_batting = player.batting_stats.ab > 0
+        has_current_pitching = player.pitching_stats.ip > 0
+        
+        if has_current_batting or has_current_pitching:
+            if current_season_num not in seasons:
+                seasons.append(current_season_num)
+        
+        if not seasons:
+            return
+        
+        self.console.print(f"\n[bold {COLORS['TITLE']}]CAREER STATISTICS[/bold {COLORS['TITLE']}]")
+        
+        # Batting Stats Grid
+        has_batting_stats = any(
+            (player.career_stats.season_batting.get(season, None) and 
+             player.career_stats.season_batting[season].ab > 0) or
+            (season == current_season_num and player.batting_stats.ab > 0)
+            for season in seasons
+        )
+        
+        if has_batting_stats:
+            batting_table = Table(title="Career Batting Stats", show_header=True, header_style="bold cyan")
+            batting_table.add_column("Season", style="cyan", width=8)
+            batting_table.add_column("GP", style="white", width=4)
+            batting_table.add_column("AB", style="white", width=4)
+            batting_table.add_column("H", style="green", width=4)
+            batting_table.add_column("HR", style="yellow", width=4)
+            batting_table.add_column("RBI", style="white", width=4)
+            batting_table.add_column("BB", style="blue", width=4)
+            batting_table.add_column("K", style="red", width=4)
+            batting_table.add_column("AVG", style="green", width=6)
+            batting_table.add_column("OBP", style="cyan", width=6)
+            batting_table.add_column("SLG", style="yellow", width=6)
+            
+            for season in seasons:
+                # Use archived stats for completed seasons, current stats for current season
+                if season == current_season_num and has_current_batting:
+                    batting_stats = player.batting_stats
+                    season_label = f"Season {season}"
+                else:
+                    batting_stats = player.career_stats.season_batting.get(season)
+                    season_label = f"Season {season}"
+                
+                if batting_stats and batting_stats.ab > 0:
+                    batting_table.add_row(
+                        season_label,
+                        str(batting_stats.gp),
+                        str(batting_stats.ab),
+                        str(batting_stats.h),
+                        str(batting_stats.hr),
+                        str(batting_stats.rbi),
+                        str(batting_stats.bb),
+                        str(batting_stats.k),
+                        f"{batting_stats.avg:.3f}",
+                        f"{batting_stats.calc_obp:.3f}",
+                        f"{batting_stats.calc_slg:.3f}"
+                    )
+            
+            # Add combined totals row (career + current season)
+            career_batting = player.career_stats.career_batting
+            current_batting = player.batting_stats if has_current_batting else None
+            
+            # Calculate combined totals
+            total_gp = career_batting.gp + (current_batting.gp if current_batting else 0)
+            total_ab = career_batting.ab + (current_batting.ab if current_batting else 0)
+            total_h = career_batting.h + (current_batting.h if current_batting else 0)
+            total_hr = career_batting.hr + (current_batting.hr if current_batting else 0)
+            total_rbi = career_batting.rbi + (current_batting.rbi if current_batting else 0)
+            total_bb = career_batting.bb + (current_batting.bb if current_batting else 0)
+            total_k = career_batting.k + (current_batting.k if current_batting else 0)
+            
+            # Calculate combined averages
+            total_avg = total_h / total_ab if total_ab > 0 else 0.0
+            total_obp_num = total_h + total_bb + (current_batting.hbp if current_batting else 0) + career_batting.hbp
+            total_obp_denom = total_ab + total_bb + (current_batting.hbp if current_batting else 0) + career_batting.hbp
+            total_obp = total_obp_num / total_obp_denom if total_obp_denom > 0 else 0.0
+            
+            # Simplified SLG calculation (assumes singles = h - 2b - 3b - hr, but we don't track 2b/3b separately)
+            total_slg = total_avg + (total_hr * 3 / total_ab) if total_ab > 0 else 0.0  # Rough approximation
+            
+            if total_ab > 0:
+                batting_table.add_row(
+                    "[bold]TOTAL[/bold]",
+                    f"[bold]{total_gp}[/bold]",
+                    f"[bold]{total_ab}[/bold]",
+                    f"[bold]{total_h}[/bold]",
+                    f"[bold]{total_hr}[/bold]",
+                    f"[bold]{total_rbi}[/bold]",
+                    f"[bold]{total_bb}[/bold]",
+                    f"[bold]{total_k}[/bold]",
+                    f"[bold]{total_avg:.3f}[/bold]",
+                    f"[bold]{total_obp:.3f}[/bold]",
+                    f"[bold]{total_slg:.3f}[/bold]",
+                    style="bold white"
+                )
+            
+            self.console.print(batting_table)
+        
+        # Pitching Stats Grid
+        has_pitching_stats = any(
+            (player.career_stats.season_pitching.get(season, None) and 
+             player.career_stats.season_pitching[season].ip > 0) or
+            (season == current_season_num and player.pitching_stats.ip > 0)
+            for season in seasons
+        )
+        
+        if has_pitching_stats:
+            pitching_table = Table(title="Career Pitching Stats", show_header=True, header_style="bold magenta")
+            pitching_table.add_column("Season", style="cyan", width=8)
+            pitching_table.add_column("GP", style="white", width=4)
+            pitching_table.add_column("GS", style="white", width=4)
+            pitching_table.add_column("IP", style="blue", width=6)
+            pitching_table.add_column("W", style="green", width=3)
+            pitching_table.add_column("L", style="red", width=3)
+            pitching_table.add_column("K", style="yellow", width=4)
+            pitching_table.add_column("BB", style="red", width=4)
+            pitching_table.add_column("ERA", style="cyan", width=6)
+            pitching_table.add_column("WHIP", style="magenta", width=6)
+            
+            for season in seasons:
+                # Use archived stats for completed seasons, current stats for current season
+                if season == current_season_num and has_current_pitching:
+                    pitching_stats = player.pitching_stats
+                    season_label = f"Season {season}"
+                else:
+                    pitching_stats = player.career_stats.season_pitching.get(season)
+                    season_label = f"Season {season}"
+                
+                if pitching_stats and pitching_stats.ip > 0:
+                    pitching_table.add_row(
+                        season_label,
+                        str(pitching_stats.gp),
+                        str(pitching_stats.gs),
+                        f"{pitching_stats.ip:.1f}",
+                        str(pitching_stats.w),
+                        str(pitching_stats.l),
+                        str(pitching_stats.k),
+                        str(pitching_stats.bb),
+                        f"{pitching_stats.era:.2f}",
+                        f"{pitching_stats.whip:.2f}"
+                    )
+            
+            # Add combined totals row (career + current season)
+            career_pitching = player.career_stats.career_pitching
+            current_pitching = player.pitching_stats if has_current_pitching else None
+            
+            # Calculate combined totals
+            total_gp = career_pitching.gp + (current_pitching.gp if current_pitching else 0)
+            total_gs = career_pitching.gs + (current_pitching.gs if current_pitching else 0)
+            total_ip = career_pitching.ip + (current_pitching.ip if current_pitching else 0.0)
+            total_w = career_pitching.w + (current_pitching.w if current_pitching else 0)
+            total_l = career_pitching.l + (current_pitching.l if current_pitching else 0)
+            total_k = career_pitching.k + (current_pitching.k if current_pitching else 0)
+            total_bb = career_pitching.bb + (current_pitching.bb if current_pitching else 0)
+            total_er = career_pitching.er + (current_pitching.er if current_pitching else 0)
+            total_h = career_pitching.h + (current_pitching.h if current_pitching else 0)
+            
+            # Calculate combined ERA and WHIP
+            total_era = (total_er * 3) / total_ip if total_ip > 0 else 0.0  # MLW games are 3 innings
+            total_whip = (total_bb + total_h) / total_ip if total_ip > 0 else 0.0
+            
+            if total_ip > 0:
+                pitching_table.add_row(
+                    "[bold]TOTAL[/bold]",
+                    f"[bold]{total_gp}[/bold]",
+                    f"[bold]{total_gs}[/bold]",
+                    f"[bold]{total_ip:.1f}[/bold]",
+                    f"[bold]{total_w}[/bold]",
+                    f"[bold]{total_l}[/bold]",
+                    f"[bold]{total_k}[/bold]",
+                    f"[bold]{total_bb}[/bold]",
+                    f"[bold]{total_era:.2f}[/bold]",
+                    f"[bold]{total_whip:.2f}[/bold]",
+                    style="bold white"
+                )
+            
+            self.console.print(pitching_table)
+    
+    def show_current_season_stats(self, player: Player):
+        """Show current season stats panels"""
+        self.console.print(f"\n[bold {COLORS['WARNING']}]CURRENT SEASON STATS[/bold {COLORS['WARNING']}]")
+        
+        # Current season batting stats
         if player.batting_stats.ab > 0:
             batting_panel = Panel(
                 f"Games: {player.batting_stats.gp}\n"
                 f"At Bats: {player.batting_stats.ab}\n"
                 f"Hits: {player.batting_stats.h}\n"
                 f"Home Runs: {player.batting_stats.hr}\n"
+                f"RBI: {player.batting_stats.rbi}\n"
                 f"Walks: {player.batting_stats.bb}\n"
                 f"Strikeouts: {player.batting_stats.k}\n"
                 f"Average: {player.batting_stats.avg:.3f}\n"
                 f"OBP: {player.batting_stats.calc_obp:.3f}\n"
                 f"SLG: {player.batting_stats.calc_slg:.3f}\n"
                 f"OPS: {player.batting_stats.calc_ops:.3f}",
-                title="Batting Stats",
+                title="Current Season Batting",
                 border_style=COLORS["SUCCESS"]
             )
             self.console.print(batting_panel)
         
-        # Pitching stats
+        # Current season pitching stats
         if player.pitching_stats.ip > 0:
             pitching_panel = Panel(
                 f"Games: {player.pitching_stats.gp}\n"
@@ -195,12 +402,12 @@ class TeamManagementUI:
                 f"ERA: {player.pitching_stats.era:.2f}\n"
                 f"WHIP: {player.pitching_stats.whip:.2f}\n"
                 f"K/BB: {player.pitching_stats.so_bb:.2f}",
-                title="Pitching Stats",
+                title="Current Season Pitching",
                 border_style=COLORS["WARNING"]
             )
             self.console.print(pitching_panel)
         
-        # Fielding stats
+        # Current season fielding stats
         if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0:
             fielding_panel = Panel(
                 f"Putouts: {player.fielding_stats.po}\n"
@@ -208,7 +415,7 @@ class TeamManagementUI:
                 f"Errors: {player.fielding_stats.e}\n"
                 f"Double Plays: {player.fielding_stats.dp}\n"
                 f"Fielding Pct: {player.fielding_stats.calc_fpct:.3f}",
-                title="Fielding Stats",
+                title="Current Season Fielding",
                 border_style=COLORS["SUCCESS"]
             )
             self.console.print(fielding_panel)

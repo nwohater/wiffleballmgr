@@ -33,8 +33,8 @@ class PlayerDevelopment:
                 player.retired = True
                 return
         
-        # Calculate development based on performance
-        self.calculate_performance_bonus(player)
+        # Calculate development based on experience and playing time
+        self.calculate_experience_bonus(player)
         
         # Apply aging effects
         self.apply_aging_effects(player)
@@ -42,29 +42,113 @@ class PlayerDevelopment:
         # Random development events
         self.random_development_events(player)
     
-    def calculate_performance_bonus(self, player: Player):
-        """Calculate development bonus based on season performance"""
-        # Batting performance bonus
-        if player.batting_stats.ab > 0:
-            avg = player.batting_stats.avg
-            if avg > 0.300:  # Good hitter
-                self.improve_attribute(player, 'velocity', 1, 3)
-                self.improve_attribute(player, 'control', 1, 2)
-            elif avg < 0.200:  # Poor hitter
-                self.improve_attribute(player, 'velocity', -2, -1)
-                self.improve_attribute(player, 'control', -1, 0)
+    def calculate_experience_bonus(self, player: Player):
+        """Calculate development bonus based on playing time and experience"""
+        batting_experience = self.calculate_batting_experience(player)
+        pitching_experience = self.calculate_pitching_experience(player)
         
-        # Pitching performance bonus
-        if player.pitching_stats.ip > 0:
-            era = player.pitching_stats.era
-            if era < 2.0:  # Excellent pitcher
-                self.improve_attribute(player, 'velocity', 1, 3)
-                self.improve_attribute(player, 'control', 2, 4)
-                self.improve_attribute(player, 'stamina', 1, 2)
-            elif era > 5.0:  # Poor pitcher
-                self.improve_attribute(player, 'velocity', -1, 0)
-                self.improve_attribute(player, 'control', -2, -1)
-                self.improve_attribute(player, 'stamina', -1, 0)
+        # Apply batting development based on experience
+        if batting_experience > 0:
+            self.apply_batting_development(player, batting_experience)
+        
+        # Apply pitching development based on experience
+        if pitching_experience > 0:
+            self.apply_pitching_development(player, pitching_experience)
+    
+    def calculate_batting_experience(self, player: Player) -> float:
+        """Calculate batting experience factor (0.0 to 1.0)"""
+        if not hasattr(player, 'batting_stats') or not player.batting_stats:
+            return 0.0
+        
+        # Base experience on games played and plate appearances
+        games_played = player.batting_stats.gp
+        plate_appearances = player.batting_stats.pa
+        
+        # Experience factors
+        games_factor = min(games_played / 30.0, 1.0)  # Cap at 30 games
+        pa_factor = min(plate_appearances / 100.0, 1.0)  # Cap at 100 PAs
+        
+        # Weight plate appearances more heavily than just games
+        experience = (games_factor * 0.4) + (pa_factor * 0.6)
+        
+        return min(experience, 1.0)
+    
+    def calculate_pitching_experience(self, player: Player) -> float:
+        """Calculate pitching experience factor (0.0 to 1.0)"""
+        if not hasattr(player, 'pitching_stats') or not player.pitching_stats:
+            return 0.0
+        
+        # Base experience on games pitched and innings pitched
+        games_pitched = player.pitching_stats.gp
+        innings_pitched = player.pitching_stats.ip
+        
+        # Experience factors
+        games_factor = min(games_pitched / 25.0, 1.0)  # Cap at 25 games
+        ip_factor = min(innings_pitched / 75.0, 1.0)  # Cap at 75 innings
+        
+        # Weight innings pitched more heavily
+        experience = (games_factor * 0.3) + (ip_factor * 0.7)
+        
+        return min(experience, 1.0)
+    
+    def apply_batting_development(self, player: Player, experience: float):
+        """Apply batting development based on experience"""
+        # Base chance of improvement scaled by experience
+        improvement_chance = 0.15 + (experience * 0.25)  # 15% to 40% chance
+        
+        if random.random() < improvement_chance:
+            # Modest improvements for regular players
+            if experience >= 0.7:  # High experience (21+ games, 70+ PAs)
+                # Better chance for larger improvements
+                if random.random() < 0.3:
+                    self.improve_attribute(player, 'velocity', 1, 3)
+                    print(f"{player.name}: Batting power improved through experience")
+                else:
+                    self.improve_attribute(player, 'control', 1, 2)
+                    print(f"{player.name}: Batting control improved through practice")
+            
+            elif experience >= 0.4:  # Moderate experience (12+ games, 40+ PAs)
+                # Modest improvements
+                attr = random.choice(['velocity', 'control'])
+                self.improve_attribute(player, attr, 0, 2)
+                print(f"{player.name}: Modest batting improvement from regular play")
+            
+            else:  # Low experience
+                # Small improvements
+                attr = random.choice(['velocity', 'control'])
+                self.improve_attribute(player, attr, 0, 1)
+                print(f"{player.name}: Minor batting development from limited play")
+    
+    def apply_pitching_development(self, player: Player, experience: float):
+        """Apply pitching development based on experience"""
+        # Base chance of improvement scaled by experience
+        improvement_chance = 0.20 + (experience * 0.25)  # 20% to 45% chance
+        
+        if random.random() < improvement_chance:
+            # Pitching tends to improve more with experience than batting
+            if experience >= 0.7:  # High experience (18+ games, 50+ IP)
+                # Better chance for larger improvements
+                if random.random() < 0.4:
+                    attrs = random.sample(['velocity', 'control', 'stamina'], 2)
+                    for attr in attrs:
+                        self.improve_attribute(player, attr, 1, 2)
+                    print(f"{player.name}: Significant pitching improvement through experience")
+                else:
+                    attr = random.choice(['velocity', 'control', 'stamina'])
+                    self.improve_attribute(player, attr, 1, 3)
+                    print(f"{player.name}: Pitching {attr} improved through heavy use")
+            
+            elif experience >= 0.4:  # Moderate experience (10+ games, 30+ IP)
+                # Modest improvements
+                attr = random.choice(['velocity', 'control', 'stamina'])
+                self.improve_attribute(player, attr, 0, 2)
+                print(f"{player.name}: Modest pitching improvement from regular starts")
+            
+            else:  # Low experience
+                # Small improvements
+                attr = random.choice(['velocity', 'control'])
+                self.improve_attribute(player, attr, 0, 1)
+                print(f"{player.name}: Minor pitching development from limited use")
     
     def apply_aging_effects(self, player: Player):
         """Apply aging effects to player attributes"""
@@ -86,14 +170,14 @@ class PlayerDevelopment:
                 self.improve_attribute(player, 'speed_control', -1, 0)
     
     def random_development_events(self, player: Player):
-        """Random development events that can occur"""
+        """Random development events that can occur (reduced frequency since experience is primary)"""
         events = [
-            ("Training breakthrough", 0.05, lambda p: self.improve_attribute(p, 'velocity', 2, 5)),
-            ("Control improvement", 0.05, lambda p: self.improve_attribute(p, 'control', 2, 5)),
-            ("Stamina boost", 0.05, lambda p: self.improve_attribute(p, 'stamina', 2, 5)),
-            ("Speed control mastery", 0.05, lambda p: self.improve_attribute(p, 'speed_control', 2, 5)),
-            ("Injury setback", 0.03, lambda p: self.improve_attribute(p, 'velocity', -3, -1)),
-            ("Control issues", 0.03, lambda p: self.improve_attribute(p, 'control', -3, -1)),
+            ("Training breakthrough", 0.02, lambda p: self.improve_attribute(p, 'velocity', 2, 4)),
+            ("Control workshop", 0.02, lambda p: self.improve_attribute(p, 'control', 2, 4)),
+            ("Conditioning program", 0.02, lambda p: self.improve_attribute(p, 'stamina', 2, 4)),
+            ("Technique refinement", 0.02, lambda p: self.improve_attribute(p, 'speed_control', 2, 4)),
+            ("Minor injury", 0.015, lambda p: self.improve_attribute(p, 'velocity', -2, -1)),
+            ("Mechanics issue", 0.015, lambda p: self.improve_attribute(p, 'control', -2, -1)),
         ]
         
         for event_name, chance, effect in events:

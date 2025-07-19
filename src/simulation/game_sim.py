@@ -325,9 +325,13 @@ class GameSimulator:
                 else:
                     new_bases[new_pos] = runner
         
-        # Place new runner on first
+        # Place new batter on the appropriate base
         if bases >= 1:
-            new_bases[0] = "batter"  # Placeholder for actual batter
+            batter_base = min(bases - 1, 2)  # Convert to 0-indexed, max at 2nd base (index 2)
+            if bases == 4:  # Home run - batter scores, doesn't occupy a base
+                runs_scored += 1
+            else:
+                new_bases[batter_base] = "batter"  # Placeholder for actual batter
         
         self.bases = new_bases
         return runs_scored
@@ -340,8 +344,13 @@ class GameSimulator:
         if at_bat.outcome == "hit":
             batter.batting_stats.h += 1
             batter.batting_stats.ab += 1
-            # Track RBIs for runs scored (from hit result + additional runners)
-            batter.batting_stats.rbi += at_bat.runs_scored + additional_rbi
+            # Track RBIs for runs scored
+            if "home run" in at_bat.details.lower():
+                # Home runs already include all RBIs in runs_scored
+                batter.batting_stats.rbi += at_bat.runs_scored
+            else:
+                # Other hits: runs from the hit + additional runners driven in
+                batter.batting_stats.rbi += at_bat.runs_scored + additional_rbi
             if "single" in at_bat.details.lower():
                 pass  # Single
             elif "double" in at_bat.details.lower():

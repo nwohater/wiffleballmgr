@@ -128,10 +128,15 @@ class MainMenu(BaseMenu):
         self.engine.set_game_data("current_game", 1)
         self.engine.set_game_data("current_series", 1)
         
-        # Show team selection
-        self.select_team(teams)
+        # Skip team selection and go directly to season menu
+        self.console.print("[green]Teams generated successfully![/green]")
+        self.engine.change_state(GAME_STATES["SEASON_MENU"])
         
-        return "quit"
+        # Show season menu
+        season_menu = SeasonMenu(self.engine)
+        season_menu.run()
+        
+        return None
     
     def generate_teams(self):
         """Generate teams for the league with unique team names and unique player names."""
@@ -341,6 +346,7 @@ class SeasonMenu(BaseMenu):
         self.add_item("5", "Trade Players", self.trade_players, "Make trades with other teams")
         self.add_item("6", "Simulate Season", self.simulate_season, "Simulate the entire season")
         self.add_item("7", "Show Stats", self.show_stats, "View all team batting and pitching statistics")
+        self.add_item("8", "Next Season", self.progress_to_next_season, "Progress to next season with current rosters")
         self.add_item("b", "Back to Main", self.back_to_main, "Return to main menu")
         self.add_item("q", "Quit", self.quit_game, "Exit the game")
     
@@ -468,12 +474,23 @@ class SeasonMenu(BaseMenu):
         """Simulate the entire season"""
         if Confirm.ask("Simulate the entire season?"):
             season_sim = self.engine.get_game_data("season_simulator")
-            if season_sim:
-                self.console.print("[green]Simulating season...[/green]")
-                results = season_sim.simulate_full_season()
-                
-                # Show results
-                self.show_season_results(results)
+            teams = self.engine.get_game_data("teams")
+            
+            if not season_sim:
+                self.console.print("[red]Error: No season simulator found. Please start a new game first.[/red]")
+                Prompt.ask("\nPress Enter to continue")
+                return None
+            
+            if not teams:
+                self.console.print("[red]Error: No teams found. Please start a new game first.[/red]")
+                Prompt.ask("\nPress Enter to continue")
+                return None
+            
+            self.console.print("[green]Simulating season...[/green]")
+            results = season_sim.simulate_full_season()
+            
+            # Show results
+            self.show_season_results(results)
         return None
     
     def show_stats(self):
@@ -650,6 +667,61 @@ class SeasonMenu(BaseMenu):
             self.console.print(table)
         
         Prompt.ask("\nPress Enter to continue")
+    
+    def progress_to_next_season(self):
+        """Progress to the next season with current rosters"""
+        season_sim = self.engine.get_game_data("season_simulator")
+        teams = self.engine.get_game_data("teams")
+        
+        if not season_sim:
+            self.console.print("[red]Error: No season simulator found.[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return None
+        
+        if not teams:
+            self.console.print("[red]Error: No teams found.[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return None
+        
+        # Show current season info
+        current_season = season_sim.current_season
+        total_players = sum(len(team.get_all_players()) for team in teams)
+        
+        self.console.print(f"\n[yellow]Current Season: {current_season}[/yellow]")
+        self.console.print(f"[yellow]Total Active Players: {total_players}[/yellow]")
+        
+        # Confirm progression
+        if not Confirm.ask(f"\nProgress to Season {current_season + 1} with current rosters?"):
+            return None
+        
+        # Progress to next season
+        try:
+            self.console.print("\n[green]Processing season progression...[/green]")
+            result = season_sim.progress_to_next_season()
+            
+            # Update game data with new season number
+            self.engine.set_game_data("current_season", result["new_season"])
+            
+            # Show summary
+            self.console.print(f"\n[bold green]Season {result['new_season']} is ready![/bold green]")
+            self.console.print(f"Active players: {result['total_active_players']}")
+            
+            if result.get("draft_completed"):
+                self.console.print(f"[green]✅ End-of-season draft completed[/green]")
+            
+            if result["retired_players"]:
+                self.console.print(f"\n[yellow]Retired players this offseason:[/yellow]")
+                for player in result["retired_players"]:
+                    seasons = len(player.seasons_played)
+                    self.console.print(f"  - {player.name} (Age {player.age}, {seasons} seasons)")
+            
+        except Exception as e:
+            self.console.print(f"[red]Error progressing to next season: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+        
+        Prompt.ask("\nPress Enter to continue")
+        return None
     
     def back_to_main(self):
         """Return to main menu"""

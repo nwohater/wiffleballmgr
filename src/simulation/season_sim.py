@@ -9,10 +9,11 @@ from simulation.game_sim import GameSimulator
 import random
 
 class SeasonSimulator:
-    def __init__(self, teams: List[Team], games_per_season: int = 15, innings_per_game: int = 3):
+    def __init__(self, teams: List[Team], games_per_season: int = 15, innings_per_game: int = 3, current_season: int = 1):
         self.teams = teams
         self.games_per_season = games_per_season
         self.innings_per_game = innings_per_game
+        self.current_season = current_season
         self.schedule = []  # List of (home_team, away_team) tuples
         self.series_schedule = []  # List of series (3 games each)
         self.results: List[dict] = []
@@ -158,7 +159,6 @@ class SeasonSimulator:
         self.teams.sort(key=lambda t: t.wins, reverse=True)
         self.play_playoffs()
         self.show_season_leaders()
-        self.conduct_rookie_draft(rounds=2)
         
         # Restore regular season standings for final results
         self.teams = regular_season_standings
@@ -422,6 +422,200 @@ class SeasonSimulator:
             ratings = f"Bat: H={batting.h}, HR={batting.hr} | Pitch: V={rookie.velocity}, K={pitching.k}"
         return rookie, rookie_type, ratings
     
+    def conduct_one_round_draft(self):
+        """Conduct a 1-round draft where each team cuts their worst player and adds a drafted player"""
+        print("\n" + "="*60)
+        print("END OF SEASON DRAFT - 1 ROUND")
+        print("Each team will cut their worst player and draft a new one")
+        print("="*60)
+        
+        # Get draft order (worst teams pick first)
+        draft_order = sorted(self.teams, key=lambda t: t.wins)
+        
+        # Generate draft prospects (mix of rookies and veterans)
+        draft_prospects = self.generate_draft_prospects(len(self.teams))
+        
+        print(f"\nDraft Prospects Available:")
+        for i, (prospect, prospect_type, ratings) in enumerate(draft_prospects, 1):
+            print(f"{i:2d}. {prospect.name} [{prospect_type}] - {ratings}")
+        
+        # Conduct draft
+        print(f"\nDraft Order (based on regular season record):")
+        for i, team in enumerate(draft_order, 1):
+            print(f"{i:2d}. {team.name} ({team.wins}-{team.losses})")
+        
+        print(f"\nDRAFT RESULTS:")
+        print("-" * 60)
+        
+        for pick_num, team in enumerate(draft_order, 1):
+            # Find worst player on team
+            worst_player = self.find_worst_player(team)
+            
+            # Draft a prospect (teams pick in order)
+            if pick_num <= len(draft_prospects):
+                drafted_player, prospect_type, ratings = draft_prospects[pick_num - 1]
+                
+                # Cut worst player and add drafted player
+                if worst_player:
+                    team.remove_player(worst_player)
+                    print(f"Pick {pick_num:2d}: {team.name}")
+                    print(f"         ❌ Cut: {worst_player.name} (Value: {self.calculate_player_value(worst_player):.1f})")
+                    print(f"         ✅ Drafted: {drafted_player.name} [{prospect_type}] - {ratings}")
+                    
+                    # Add drafted player to active roster
+                    team.add_player(drafted_player, active=True)
+                else:
+                    print(f"Pick {pick_num:2d}: {team.name}")
+                    print(f"         ✅ Drafted: {drafted_player.name} [{prospect_type}] - {ratings}")
+                    print(f"         (No player cut - added to reserves)")
+                    team.add_player(drafted_player, active=False)
+                
+                print()
+        
+        print("Draft completed! All teams have refreshed their rosters.")
+    
+    def generate_draft_prospects(self, num_prospects):
+        """Generate a pool of draft prospects (mix of rookies and veterans)"""
+        prospects = []
+        
+        for i in range(num_prospects):
+            # 60% rookies, 40% veterans
+            if random.random() < 0.6:
+                prospect, prospect_type, ratings = self.generate_realistic_rookie()
+            else:
+                prospect, prospect_type, ratings = self.generate_veteran_prospect()
+            
+            prospects.append((prospect, prospect_type, ratings))
+        
+        return prospects
+    
+    def generate_veteran_prospect(self):
+        """Generate a veteran free agent prospect"""
+        first_names = ["Chris", "Mike", "John", "David", "Steve", "Tony", "Mark", "Paul"]
+        last_names = ["Wilson", "Thompson", "Anderson", "Taylor", "Moore", "Jackson", "White", "Harris"]
+        name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        
+        # Veterans have better base stats but are older
+        age = random.randint(26, 34)
+        
+        prospect_type = random.choices(
+            ["Veteran Hitter", "Veteran Pitcher", "Veteran Utility"],
+            weights=[0.4, 0.3, 0.3],
+            k=1
+        )[0]
+        
+        if prospect_type == "Veteran Hitter":
+            batting = BattingStats()
+            batting.h = random.randint(15, 30)
+            batting.hr = random.randint(2, 8)
+            batting.bb = random.randint(8, 15)
+            batting.k = random.randint(10, 20)
+            prospect = Player(
+                name=name,
+                age=age,
+                velocity=random.randint(40, 60),
+                control=random.randint(40, 60),
+                stamina=random.randint(40, 60),
+                speed_control=random.randint(40, 60),
+                range=random.randint(70, 90),
+                arm_strength=random.randint(60, 85),
+                accuracy=random.randint(65, 90),
+                batting_stats=batting
+            )
+            ratings = f"Age {age}, Bat: H={batting.h}, HR={batting.hr}, BB={batting.bb}"
+        elif prospect_type == "Veteran Pitcher":
+            pitching = PitchingStats()
+            pitching.k = random.randint(15, 35)
+            pitching.bb = random.randint(3, 12)
+            prospect = Player(
+                name=name,
+                age=age,
+                velocity=random.randint(65, 85),
+                control=random.randint(65, 85),
+                stamina=random.randint(65, 85),
+                speed_control=random.randint(65, 85),
+                range=random.randint(50, 70),
+                arm_strength=random.randint(70, 90),
+                accuracy=random.randint(55, 75),
+                pitching_stats=pitching
+            )
+            ratings = f"Age {age}, Pitch: V={prospect.velocity}, C={prospect.control}, K={pitching.k}"
+        else:  # Veteran Utility
+            batting = BattingStats()
+            batting.h = random.randint(10, 20)
+            batting.hr = random.randint(1, 4)
+            batting.bb = random.randint(5, 12)
+            batting.k = random.randint(8, 15)
+            pitching = PitchingStats()
+            pitching.k = random.randint(8, 20)
+            pitching.bb = random.randint(4, 12)
+            prospect = Player(
+                name=name,
+                age=age,
+                velocity=random.randint(55, 75),
+                control=random.randint(55, 75),
+                stamina=random.randint(55, 75),
+                speed_control=random.randint(55, 75),
+                range=random.randint(60, 80),
+                arm_strength=random.randint(65, 85),
+                accuracy=random.randint(60, 80),
+                batting_stats=batting,
+                pitching_stats=pitching
+            )
+            ratings = f"Age {age}, Utility: V={prospect.velocity}, H={batting.h}"
+        
+        return prospect, prospect_type, ratings
+    
+    def find_worst_player(self, team):
+        """Find the worst player on a team based on overall value"""
+        all_players = team.get_all_players()
+        if not all_players:
+            return None
+        
+        # Calculate value for each player and find the worst
+        worst_player = None
+        worst_value = float('inf')
+        
+        for player in all_players:
+            value = self.calculate_player_value(player)
+            if value < worst_value:
+                worst_value = value
+                worst_player = player
+        
+        return worst_player
+    
+    def calculate_player_value(self, player):
+        """Calculate a player's overall value (simplified version of trading system)"""
+        # Base value from attributes
+        base_value = (player.velocity + player.control + player.stamina + player.speed_control) / 4.0
+        
+        # Age factor
+        age_factor = 1.0
+        if player.age < 25:
+            age_factor = 1.2
+        elif player.age > 30:
+            age_factor = 0.8
+        
+        # Performance factor
+        performance_factor = 1.0
+        if hasattr(player, 'batting_stats') and player.batting_stats and player.batting_stats.ab > 0:
+            if player.batting_stats.avg > 0.300:
+                performance_factor += 0.2
+            elif player.batting_stats.avg < 0.200:
+                performance_factor -= 0.2
+        
+        if hasattr(player, 'pitching_stats') and player.pitching_stats and player.pitching_stats.ip > 0:
+            if player.pitching_stats.era < 2.0:
+                performance_factor += 0.2
+            elif player.pitching_stats.era > 5.0:
+                performance_factor -= 0.2
+        
+        # Retirement risk
+        if player.age > 35:
+            performance_factor *= 0.7
+        
+        return base_value * age_factor * performance_factor
+    
     def get_next_opponent(self, team):
         """Get the next opponent for a team"""
         if not self.schedule:
@@ -463,4 +657,116 @@ class SeasonSimulator:
         return {
             "champion": champion,
             "standings": standings
-        } 
+        }
+    
+    def progress_to_next_season(self):
+        """Progress to the next season with roster continuity and player aging"""
+        print("\n" + "="*60)
+        print(f"PROGRESSING FROM SEASON {self.current_season} TO SEASON {self.current_season + 1}")
+        print("="*60)
+        
+        # Complete current season for all players
+        print(f"\nArchiving Season {self.current_season} statistics...")
+        self.complete_season_for_all_players()
+        
+        # Age players and handle retirements
+        print(f"\nProcessing player aging and retirements...")
+        retired_players = self.age_players_and_handle_retirements()
+        
+        # Develop players for next season
+        print(f"\nProcessing player development...")
+        self.develop_players_for_next_season()
+        
+        # Conduct draft to refresh rosters
+        print(f"\nConducting end-of-season draft...")
+        self.conduct_one_round_draft()
+        
+        # Reset team records
+        print(f"\nResetting team records for new season...")
+        self.reset_team_records()
+        
+        # Increment season
+        self.current_season += 1
+        
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"READY FOR SEASON {self.current_season}")
+        print(f"{'='*60}")
+        print(f"Retired players: {len(retired_players)}")
+        for player in retired_players:
+            print(f"  - {player.get_career_summary()}")
+        
+        print(f"\nDraft completed and rosters refreshed. Season {self.current_season} ready to begin!")
+        
+        return {
+            "new_season": self.current_season,
+            "retired_players": retired_players,
+            "total_active_players": sum(len(team.get_all_players()) for team in self.teams),
+            "draft_completed": True
+        }
+    
+    def complete_season_for_all_players(self):
+        """Archive current season stats for all players"""
+        for team in self.teams:
+            for player in team.get_all_players():
+                player.complete_season(self.current_season)
+                player.reset_season_stats()
+    
+    def age_players_and_handle_retirements(self) -> List[Player]:
+        """Age all players and handle retirements"""
+        retired_players = []
+        
+        for team in self.teams:
+            players_to_remove = []
+            
+            for player in team.get_all_players():
+                # Age the player
+                player.age += 1
+                
+                # Check for retirement
+                if self.should_player_retire(player):
+                    player.retired = True
+                    retired_players.append(player)
+                    players_to_remove.append(player)
+            
+            # Remove retired players from team
+            for player in players_to_remove:
+                team.remove_player(player)
+        
+        return retired_players
+    
+    def should_player_retire(self, player: Player) -> bool:
+        """Determine if a player should retire based on age and performance"""
+        if player.age < 35:
+            return False
+        
+        # Retirement chances increase with age
+        if player.age >= 40:
+            return random.random() < 0.3  # 30% chance at 40+
+        elif player.age >= 37:
+            return random.random() < 0.15  # 15% chance at 37-39
+        elif player.age >= 35:
+            return random.random() < 0.05  # 5% chance at 35-36
+        
+        return False
+    
+    def develop_players_for_next_season(self):
+        """Apply player development for the upcoming season"""
+        from simulation.player_dev import PlayerDevelopment
+        
+        player_dev = PlayerDevelopment()
+        for team in self.teams:
+            players = team.get_all_players()
+            if players:
+                player_dev.develop_players(players)
+    
+    def reset_team_records(self):
+        """Reset team win/loss records for new season"""
+        for team in self.teams:
+            team.wins = 0
+            team.losses = 0
+            # Reset playoff stats if they exist
+            if hasattr(team, 'playoff_wins'):
+                team.playoff_wins = 0
+            if hasattr(team, 'playoff_losses'):
+                team.playoff_losses = 0 
