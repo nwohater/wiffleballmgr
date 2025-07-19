@@ -350,8 +350,8 @@ class SeasonSimulator:
         # Find all rookie players (first season players)
         rookies = []
         for player in all_players:
-            # A rookie is someone who has only played in the current season
-            if len(player.seasons_played) == 1:
+            # A rookie is someone who has never completed a season before (first year)
+            if len(player.seasons_played) == 0:
                 rookies.append(player)
         
         if not rookies:
