@@ -20,6 +20,10 @@ class Team:
     # Team stats (aggregate, can be expanded)
     runs_scored: int = 0
     runs_allowed: int = 0
+    
+    # Coach quality (affects player development)
+    coach_quality: int = 50  # 1-100 scale, affects development
+    
     # Add more team-level stats as needed
 
     def add_player(self, player: Player, active: bool = True) -> bool:

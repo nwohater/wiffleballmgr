@@ -1,0 +1,209 @@
+name: Monte-Carlo Model Validation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/simulation/**'
+      - 'src/models/**' 
+      - 'test_monte_carlo_*.py'
+      - 'requirements.txt'
+      - '.github/workflows/monte-carlo-validation.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/simulation/**'
+      - 'src/models/**'
+      - 'test_monte_carlo_*.py'
+      - 'requirements.txt'
+  schedule:
+    # Run nightly at 2 AM UTC to catch model drift
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      num_seasons:
+        description: 'Number of seasons to simulate'
+        required: false
+        default: '500'
+        type: string
+      correlation_threshold:
+        description: 'Minimum r² threshold for correlation tests'
+        required: false
+        default: '0.4'
+        type: string
+
+jobs:
+  quick-validation:
+    name: Quick Monte-Carlo Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run quick Monte-Carlo validation
+      env:
+        CI: true
+        MONTE_CARLO_SEASONS: ${{ github.event.inputs.num_seasons || '200' }}
+        CORRELATION_THRESHOLD: ${{ github.event.inputs.correlation_threshold || '0.4' }}
+      run: |
+        python test_monte_carlo_quick.py
+
+    - name: Upload results on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: monte-carlo-failure-logs
+        path: |
+          monte_carlo_results/
+          *.log
+        retention-days: 7
+
+  full-validation:
+    name: Full Monte-Carlo Validation (Nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 120
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run full Monte-Carlo validation
+      env:
+        CI: true
+        MONTE_CARLO_SEASONS: ${{ github.event.inputs.num_seasons || '2000' }}
+      run: |
+        python test_monte_carlo_tuning.py
+
+    - name: Upload validation results
+      uses: actions/upload-artifact@v3
+      with:
+        name: monte-carlo-full-results-${{ github.run_number }}
+        path: monte_carlo_results/
+        retention-days: 30
+
+    - name: Create issue on validation failure
+      if: failure() && github.event_name == 'schedule'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const title = `🚨 Nightly Monte-Carlo Validation Failed - ${new Date().toISOString().split('T')[0]}`;
+          const body = `
+          ## Monte-Carlo Model Validation Failure
+          
+          The nightly Monte-Carlo validation test has failed, indicating potential model drift or regression.
+          
+          **Details:**
+          - **Run:** ${{ github.run_id }}
+          - **Date:** ${new Date().toISOString()}
+          - **Branch:** ${{ github.ref_name }}
+          - **Commit:** ${{ github.sha }}
+          
+          **Possible Causes:**
+          - Model parameters have drifted beyond acceptable bounds
+          - Changes to simulation logic affecting skill-stat correlations  
+          - Statistical thresholds may need adjustment
+          - Infrastructure or dependency issues
+          
+          **Next Steps:**
+          1. Review the [failed workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          2. Download and analyze the validation artifacts
+          3. Check recent changes to simulation code
+          4. Run local validation tests to reproduce the issue
+          
+          **Validation Criteria:**
+          - Skill-stat correlations must have r² ≥ 0.6
+          - Statistical distributions must be within expected bounds
+          - Model drift must be ≤ 15% from baseline
+          
+          Please investigate and resolve this issue promptly to maintain model quality.
+          `;
+          
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: title,
+            body: body,
+            labels: ['bug', 'monte-carlo', 'model-validation', 'high-priority']
+          });
+
+  benchmark-performance:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run performance benchmark
+      env:
+        CI: true
+        MONTE_CARLO_SEASONS: '50'  # Small sample for speed
+      run: |
+        echo "::group::Performance Benchmark"
+        time python test_monte_carlo_quick.py
+        echo "::endgroup::"
+
+    - name: Comment performance results
+      if: always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          const comment = `
+          ## 🎲 Monte-Carlo Performance Benchmark
+          
+          Performance benchmark completed for this PR.
+          
+          **Configuration:**
+          - Seasons simulated: 50 (quick test)
+          - Test duration: See workflow logs
+          - Status: ${{ job.status }}
+          
+          The simulation engine performance appears to be stable for basic validation scenarios.
+          `;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

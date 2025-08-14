@@ -5,6 +5,7 @@ import random
 from typing import List, Tuple, Optional
 from models.team import Team
 from models.player import Player
+from simulation.advanced_stats import AdvancedStatsCalculator
 
 class TradeOffer:
     """Represents a trade offer between teams"""
@@ -19,8 +20,16 @@ class TradeOffer:
 class TradingSystem:
     """Handles player trades between teams"""
     
-    def __init__(self):
+    def __init__(self, teams: List[Team] = None):
         self.trade_deadline = 10  # Games before end of season when trading closes
+        self.advanced_stats = AdvancedStatsCalculator()
+        self.league_context = None
+        if teams:
+            self.update_league_context(teams)
+    
+    def update_league_context(self, teams: List[Team]):
+        """Update league context for advanced stats calculations"""
+        self.league_context = self.advanced_stats.calculate_league_context(teams)
         
     def evaluate_trade(self, offer: TradeOffer) -> Tuple[bool, str]:
         """Evaluate a trade offer and return approval decision with reason"""
@@ -41,41 +50,106 @@ class TradingSystem:
             return False, offer.reason
     
     def calculate_team_value(self, players: List[Player]) -> float:
-        """Calculate the total value of a list of players"""
+        """Calculate the total value of a list of players using advanced metrics"""
         total_value = 0.0
         
         for player in players:
-            # Base value from attributes
-            base_value = (player.velocity + player.control + player.stamina + player.speed_control) / 4.0
-            
-            # Age factor (younger players worth more)
-            age_factor = 1.0
-            if player.age < 25:
-                age_factor = 1.2  # Young players worth 20% more
-            elif player.age > 30:
-                age_factor = 0.8  # Older players worth 20% less
-            
-            # Performance factor
-            performance_factor = 1.0
-            if hasattr(player, 'batting_stats') and player.batting_stats.ab > 0:
-                if player.batting_stats.avg > 0.300:
-                    performance_factor += 0.2
-                elif player.batting_stats.avg < 0.200:
-                    performance_factor -= 0.2
-            
-            if hasattr(player, 'pitching_stats') and player.pitching_stats.ip > 0:
-                if player.pitching_stats.era < 2.0:
-                    performance_factor += 0.2
-                elif player.pitching_stats.era > 5.0:
-                    performance_factor -= 0.2
-            
-            # Retirement risk factor
-            if player.age > 35:
-                performance_factor *= 0.7  # High retirement risk
-            
-            total_value += base_value * age_factor * performance_factor
+            total_value += self.calculate_player_value(player)
         
         return total_value
+    
+    def calculate_player_value(self, player: Player) -> float:
+        """Calculate individual player value using advanced statistics and traditional metrics"""
+        # Calculate advanced stats if not already done
+        if self.league_context and not hasattr(player, 'war'):
+            batting_advanced, pitching_advanced, fielding_advanced, war = \
+                self.advanced_stats.calculate_all_advanced_stats(player, self.league_context)
+            player.batting_advanced_stats = batting_advanced
+            player.pitching_advanced_stats = pitching_advanced
+            player.fielding_advanced_stats = fielding_advanced
+            player.war = war
+        
+        # Base value from WAR if available
+        base_value = 50.0  # Default baseline value
+        if hasattr(player, 'war') and player.war:
+            # WAR is the primary value driver (1 WAR ≈ 10 value points)
+            war_value = player.war.total_war * 10.0
+            base_value += war_value
+        else:
+            # Fallback to traditional attributes if no WAR available
+            attr_value = (player.velocity + player.control + player.stamina + player.speed_control) / 4.0
+            base_value = attr_value
+        
+        # Age factor (younger players worth more)
+        age_factor = 1.0
+        if player.age < 23:
+            age_factor = 1.3  # Very young players worth 30% more
+        elif player.age < 26:
+            age_factor = 1.2  # Young players worth 20% more
+        elif player.age > 30:
+            age_factor = 0.9  # Older players worth 10% less
+        elif player.age > 33:
+            age_factor = 0.8  # Old players worth 20% less
+        elif player.age > 36:
+            age_factor = 0.6  # Very old players worth 40% less
+        
+        # Performance factor using advanced metrics
+        performance_factor = 1.0
+        
+        # Batting performance
+        if hasattr(player, 'batting_advanced_stats') and player.batting_stats.ab > 0:
+            woba = player.batting_advanced_stats.woba
+            ops_plus = player.batting_advanced_stats.ops_plus
+            
+            if woba >= 0.400 or ops_plus >= 140:  # Elite hitter
+                performance_factor += 0.3
+            elif woba >= 0.350 or ops_plus >= 120:  # Good hitter
+                performance_factor += 0.2
+            elif woba >= 0.320 or ops_plus >= 100:  # Average hitter
+                performance_factor += 0.0
+            else:  # Below average hitter
+                performance_factor -= 0.2
+        
+        # Pitching performance
+        if hasattr(player, 'pitching_advanced_stats') and player.pitching_stats.ip > 0:
+            fip = player.pitching_advanced_stats.fip
+            era_minus = player.pitching_advanced_stats.era_minus
+            
+            if fip <= 2.50 or era_minus <= 70:  # Elite pitcher
+                performance_factor += 0.3
+            elif fip <= 3.50 or era_minus <= 90:  # Good pitcher
+                performance_factor += 0.2
+            elif fip <= 4.50 or era_minus <= 110:  # Average pitcher
+                performance_factor += 0.0
+            else:  # Below average pitcher
+                performance_factor -= 0.2
+        
+        # Fielding performance
+        if hasattr(player, 'fielding_advanced_stats'):
+            drs = player.fielding_advanced_stats.drs
+            if drs >= 5.0:  # Elite defender
+                performance_factor += 0.1
+            elif drs >= 2.0:  # Good defender
+                performance_factor += 0.05
+            elif drs <= -5.0:  # Poor defender
+                performance_factor -= 0.1
+        
+        # Retirement risk factor
+        if player.age > 35:
+            performance_factor *= 0.7  # High retirement risk
+        elif player.age > 38:
+            performance_factor *= 0.5  # Very high retirement risk
+        
+        # Two-way player bonus
+        has_batting = hasattr(player, 'batting_stats') and player.batting_stats.ab > 0
+        has_pitching = hasattr(player, 'pitching_stats') and player.pitching_stats.ip > 0
+        if has_batting and has_pitching:
+            performance_factor += 0.15  # Two-way players are valuable
+        
+        # Ensure minimum value
+        final_value = max(10.0, base_value * age_factor * performance_factor)
+        
+        return final_value
     
     def ai_propose_trade(self, team: Team, other_teams: List[Team]) -> Optional[TradeOffer]:
         """AI proposes a trade to improve the team"""

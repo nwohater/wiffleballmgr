@@ -191,13 +191,31 @@ class MainMenu(BaseMenu):
         return Player(
             name=name,
             age=random.randint(20, 30),
+            # Hitting attributes
+            power=random.randint(30, 70),
+            contact=random.randint(30, 70),
+            discipline=random.randint(30, 70),
+            speed=random.randint(30, 70),
+            # Pitching attributes
             velocity=random.randint(30, 70),
+            movement=random.randint(30, 70),
             control=random.randint(30, 70),
             stamina=random.randint(30, 70),
+            deception=random.randint(30, 70),
             speed_control=random.randint(30, 70),
+            # Fielding attributes
             range=random.randint(40, 80),
             arm_strength=random.randint(40, 80),
-            accuracy=random.randint(40, 80)
+            hands=random.randint(40, 80),
+            reaction=random.randint(40, 80),
+            accuracy=random.randint(40, 80),
+            # Mental attributes
+            leadership=random.randint(30, 70),
+            clutch=random.randint(30, 70),
+            work_ethic=random.randint(30, 70),
+            durability=random.randint(30, 70),
+            composure=random.randint(30, 70),
+            potential=random.randint(30, 70)
         )
     
     def select_team(self, teams):
@@ -244,9 +262,53 @@ class MainMenu(BaseMenu):
     def load_game(self):
         """Load a saved game"""
         self.engine.change_state(GAME_STATES["LOAD_GAME"])
-        self.console.print("[yellow]Load game functionality coming soon...[/yellow]")
-        Prompt.ask("\nPress Enter to continue")
-        return None
+        from src.utils.migration import SaveFileMigrator
+        from pathlib import Path
+        import json
+        
+        # Load the game from a specified path
+        load_path = Prompt.ask("Enter the save file path to load")
+        
+        try:
+            migrator = SaveFileMigrator()
+            
+            # Check if file needs migration
+            file_path = Path(load_path)
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+                
+            # If the game version is not 2.0, migrate the save file
+            if data.get('game_version') != '2.0':
+                self.console.print(f"[blue]Migrating save file {file_path.name} to v2.0...[/blue]")
+                migrated_data = migrator.migrate_v1_to_v2(load_path)
+                save_path = Path('data/saves/v2.0') / file_path.name
+                save_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_path, 'w') as f:
+                    json.dump(migrated_data, f, indent=2)
+                self.console.print(f"[green]Migration successful! Saved as {save_path.name}[/green]")
+                
+            else:
+                save_path = file_path
+                
+            # Load game data
+            with open(save_path, 'r') as f:
+                game_data = json.load(f)
+            
+            self.engine.set_game_data("teams", game_data.get('teams'))
+            self.engine.set_game_data("season_simulator", game_data.get('season_simulator'))
+            self.engine.set_save_file(str(save_path))
+            
+            self.console.print(f"[green]Game loaded successfully from {save_path.name}![/green]")
+            
+            # Proceed to the main season menu
+            self.engine.change_state(GAME_STATES["SEASON_MENU"])
+            season_menu = SeasonMenu(self.engine)
+            season_menu.run()
+            
+        except Exception as e:
+            self.console.print(f"[red]Failed to load game: {str(e)}[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return None
     
     def quick_game(self):
         """Play a quick single game"""
@@ -343,10 +405,12 @@ class SeasonMenu(BaseMenu):
         self.add_item("2", "Play Next Game", self.play_next_game, "Play the next scheduled game")
         self.add_item("3", "View Standings", self.view_standings, "View league standings")
         self.add_item("4", "View Schedule", self.view_schedule, "View remaining schedule")
-        self.add_item("5", "Trade Players", self.trade_players, "Make trades with other teams")
-        self.add_item("6", "Simulate Season", self.simulate_season, "Simulate the entire season")
-        self.add_item("7", "Show Stats", self.show_stats, "View all team batting and pitching statistics")
-        self.add_item("8", "Next Season", self.progress_to_next_season, "Progress to next season with current rosters")
+        self.add_item("5", "Season Diary", self.view_season_diary, "View season events and development diary")
+        self.add_item("6", "Trade Players", self.trade_players, "Make trades with other teams")
+        self.add_item("7", "Simulate Season", self.simulate_season, "Simulate the entire season")
+        self.add_item("8", "Show Stats", self.show_stats, "View all team batting and pitching statistics")
+        self.add_item("9", "Save Game", self.save_game, "Save your current progress")
+        self.add_item("10", "Next Season", self.progress_to_next_season, "Progress to next season with current rosters")
         self.add_item("b", "Back to Main", self.back_to_main, "Return to main menu")
         self.add_item("q", "Quit", self.quit_game, "Exit the game")
     
@@ -417,8 +481,213 @@ class SeasonMenu(BaseMenu):
                 game_menu.run()
             else:
                 self.console.print("[yellow]No more games scheduled this season![/yellow]")
-                Prompt.ask("\nPress Enter to continue")
+        Prompt.ask("\nPress Enter to continue")
         return None
+    
+    def save_game(self):
+        """Save the current game state"""
+        from pathlib import Path
+        import json
+        from datetime import datetime
+        
+        # Get current game data
+        teams = self.engine.get_game_data("teams")
+        season_sim = self.engine.get_game_data("season_simulator")
+        
+        if not teams or not season_sim:
+            self.console.print("[red]No game data to save![/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return None
+        
+        # Ask user for save file name
+        default_name = f"season_{season_sim.current_season}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        save_name = Prompt.ask("Enter save file name", default=default_name)
+        
+        # Add .json extension if not present
+        if not save_name.endswith('.json'):
+            save_name += '.json'
+        
+        # Create save data structure
+        save_data = {
+            "game_version": "2.0",
+            "save_date": datetime.now().isoformat(),
+            "current_season": season_sim.current_season,
+            "teams": self._serialize_teams(teams),
+            "season_simulator": self._serialize_season_sim(season_sim),
+            "game_metadata": {
+                "total_teams": len(teams),
+                "total_players": sum(len(team.get_all_players()) for team in teams),
+                "current_game": self.engine.get_game_data("current_game", 1),
+                "current_series": self.engine.get_game_data("current_series", 1)
+            }
+        }
+        
+        try:
+            # Create save directory if it doesn't exist
+            save_dir = Path('data/saves/v2.0')
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save to file
+            save_path = save_dir / save_name
+            with open(save_path, 'w') as f:
+                json.dump(save_data, f, indent=2, default=str)
+            
+            # Update engine save file
+            self.engine.set_save_file(str(save_path))
+            
+            self.console.print(f"[green]Game saved successfully as {save_name}![/green]")
+            self.console.print(f"[dim]Location: {save_path}[/dim]")
+            
+        except Exception as e:
+            self.console.print(f"[red]Failed to save game: {str(e)}[/red]")
+        
+        Prompt.ask("\nPress Enter to continue")
+        return None
+    
+    def _serialize_teams(self, teams):
+        """Serialize teams to JSON-compatible format"""
+        serialized_teams = []
+        for team in teams:
+            team_data = {
+                "name": team.name,
+                "division": team.division,
+                "wins": getattr(team, 'wins', 0),
+                "losses": getattr(team, 'losses', 0),
+                "players": []
+            }
+            
+            # Serialize all players
+            for player in team.get_all_players():
+                player_data = {
+                    "name": player.name,
+                    "age": player.age,
+                    "position": getattr(player, 'position', 'Utility'),
+                    
+                    # Hitting attributes
+                    "power": getattr(player, 'power', 50),
+                    "contact": getattr(player, 'contact', 50),
+                    "discipline": getattr(player, 'discipline', 50),
+                    "speed": getattr(player, 'speed', 50),
+                    
+                    # Pitching attributes
+                    "velocity": getattr(player, 'velocity', 50),
+                    "movement": getattr(player, 'movement', 50),
+                    "control": getattr(player, 'control', 50),
+                    "stamina": getattr(player, 'stamina', 50),
+                    "deception": getattr(player, 'deception', 50),
+                    
+                    # Fielding attributes
+                    "range": getattr(player, 'range', 50),
+                    "arm_strength": getattr(player, 'arm_strength', 50),
+                    "hands": getattr(player, 'hands', 50),
+                    "reaction": getattr(player, 'reaction', 50),
+                    "accuracy": getattr(player, 'accuracy', 50),
+                    
+                    # Mental/personality attributes
+                    "potential": getattr(player, 'potential', 50),
+                    "leadership": getattr(player, 'leadership', 50),
+                    "work_ethic": getattr(player, 'work_ethic', 50),
+                    "durability": getattr(player, 'durability', 50),
+                    "clutch": getattr(player, 'clutch', 50),
+                    "composure": getattr(player, 'composure', 50),
+                    
+                    # Physical attributes
+                    "height": getattr(player, 'height', 70),
+                    "weight": getattr(player, 'weight', 180),
+                    
+                    # Career tracking
+                    "seasons_played": getattr(player, 'seasons_played', []),
+                    "is_active": player in team.active_roster if hasattr(team, 'active_roster') else True,
+                    
+                    # Stats (if available)
+                    "batting_stats": self._serialize_batting_stats(getattr(player, 'batting_stats', None)),
+                    "pitching_stats": self._serialize_pitching_stats(getattr(player, 'pitching_stats', None)),
+                    "fielding_stats": self._serialize_fielding_stats(getattr(player, 'fielding_stats', None)),
+                    "career_stats": getattr(player, 'career_stats', {})
+                }
+                
+                team_data["players"].append(player_data)
+            
+            serialized_teams.append(team_data)
+        
+        return serialized_teams
+    
+    def _serialize_batting_stats(self, stats):
+        """Serialize batting stats to JSON format"""
+        if not stats:
+            return None
+        
+        return {
+            'gp': getattr(stats, 'gp', 0),
+            'gs': getattr(stats, 'gs', 0),
+            'pa': getattr(stats, 'pa', 0),
+            'ab': getattr(stats, 'ab', 0),
+            'r': getattr(stats, 'r', 0),
+            'h': getattr(stats, 'h', 0),
+            'doubles': getattr(stats, 'doubles', 0),
+            'triples': getattr(stats, 'triples', 0),
+            'hr': getattr(stats, 'hr', 0),
+            'rbi': getattr(stats, 'rbi', 0),
+            'bb': getattr(stats, 'bb', 0),
+            'k': getattr(stats, 'k', 0),
+            'hbp': getattr(stats, 'hbp', 0),
+            'ibb': getattr(stats, 'ibb', 0),
+            'lob': getattr(stats, 'lob', 0),
+            'tb': getattr(stats, 'tb', 0),
+            'obp': getattr(stats, 'obp', 0.0),
+            'slg': getattr(stats, 'slg', 0.0),
+            'ops': getattr(stats, 'ops', 0.0)
+        }
+    
+    def _serialize_pitching_stats(self, stats):
+        """Serialize pitching stats to JSON format"""
+        if not stats:
+            return None
+        
+        return {
+            'gp': getattr(stats, 'gp', 0),
+            'gs': getattr(stats, 'gs', 0),
+            'ip': getattr(stats, 'ip', 0.0),
+            'r': getattr(stats, 'r', 0),
+            'er': getattr(stats, 'er', 0),
+            'h': getattr(stats, 'h', 0),
+            'bb': getattr(stats, 'bb', 0),
+            'hbp': getattr(stats, 'hbp', 0),
+            'ibb': getattr(stats, 'ibb', 0),
+            'k': getattr(stats, 'k', 0),
+            'cg': getattr(stats, 'cg', 0),
+            'w': getattr(stats, 'w', 0),
+            'l': getattr(stats, 'l', 0),
+            's': getattr(stats, 's', 0),
+            'hld': getattr(stats, 'hld', 0),
+            'bs': getattr(stats, 'bs', 0),
+            'pt': getattr(stats, 'pt', 0),
+            'b': getattr(stats, 'b', 0),
+            'st': getattr(stats, 'st', 0),
+            'wp': getattr(stats, 'wp', 0)
+        }
+    
+    def _serialize_fielding_stats(self, stats):
+        """Serialize fielding stats to JSON format"""
+        if not stats:
+            return None
+        
+        return {
+            'po': getattr(stats, 'po', 0),
+            'a': getattr(stats, 'a', 0),
+            'e': getattr(stats, 'e', 0),
+            'dp': getattr(stats, 'dp', 0),
+            'fpct': getattr(stats, 'fpct', 1.0)
+        }
+    
+    def _serialize_season_sim(self, season_sim):
+        """Serialize season simulator to JSON format"""
+        return {
+            "current_season": season_sim.current_season,
+            "games_played": getattr(season_sim, 'games_played', 0),
+            "season_complete": getattr(season_sim, 'season_complete', False),
+            # Add other season simulator state as needed
+        }
     
     def view_standings(self):
         """View league standings"""
@@ -465,6 +734,121 @@ class SeasonMenu(BaseMenu):
             self.console.print(table)
             Prompt.ask("\nPress Enter to continue")
         return None
+    
+    def view_season_diary(self):
+        """View the season diary with development events and other activities"""
+        season_sim = self.engine.get_game_data("season_simulator")
+        if not season_sim or not hasattr(season_sim, 'season_diary'):
+            self.console.print("[red]No season diary available.[/red]")
+            Prompt.ask("\nPress Enter to continue")
+            return None
+        
+        diary = season_sim.season_diary
+        
+        # Display diary menu
+        while True:
+            self.console.clear()
+            self.console.print(f"[bold cyan]Season {diary.season_number} Diary[/bold cyan]\n")
+            
+            # Show summary statistics
+            dev_summary = diary.get_development_events_summary()
+            summary_table = Table(title="Development Events Summary")
+            summary_table.add_column("Event Type", style="cyan")
+            summary_table.add_column("Count", style="white")
+            
+            summary_table.add_row("Total Development Events", str(dev_summary["total_events"]))
+            summary_table.add_row("✅ Positive Events", str(dev_summary["positive_events"]))
+            summary_table.add_row("❌ Negative Events", str(dev_summary["negative_events"]))
+            summary_table.add_row("📈 Minor Events", str(dev_summary["minor_events"]))
+            summary_table.add_row("⭐ Moderate Events", str(dev_summary["moderate_events"]))
+            summary_table.add_row("🚀 Major Events", str(dev_summary["major_events"]))
+            
+            self.console.print(summary_table)
+            self.console.print()
+            
+            # Menu options
+            menu_table = Table(show_header=False, box=None)
+            menu_table.add_column("Key", style="bold cyan")
+            menu_table.add_column("Option", style="white")
+            
+            menu_table.add_row("1", "Recent Events (Last 20)")
+            menu_table.add_row("2", "Development Events Only")
+            menu_table.add_row("3", "High Priority Events")
+            menu_table.add_row("4", "Game Results")
+            menu_table.add_row("5", "Export Full Diary")
+            menu_table.add_row("b", "Back to Season Menu")
+            
+            self.console.print(menu_table)
+            self.console.print()
+            
+            choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "b"], default="1")
+            
+            if choice == "1":
+                self.show_diary_entries(diary.get_recent_entries(20), "Recent Events")
+            elif choice == "2":
+                from src.simulation.season_diary import DiaryEntryType
+                self.show_diary_entries(
+                    diary.get_entries_by_type(DiaryEntryType.DEVELOPMENT_EVENT), 
+                    "Development Events"
+                )
+            elif choice == "3":
+                self.show_diary_entries(diary.get_high_priority_entries(), "High Priority Events")
+            elif choice == "4":
+                from src.simulation.season_diary import DiaryEntryType
+                self.show_diary_entries(
+                    diary.get_entries_by_type(DiaryEntryType.GAME_RESULT), 
+                    "Game Results"
+                )
+            elif choice == "5":
+                diary_text = diary.export_diary_text()
+                self.console.print("\n[bold]Full Season Diary:[/bold]\n")
+                self.console.print(diary_text)
+                Prompt.ask("\nPress Enter to continue")
+            elif choice == "b":
+                break
+        
+        return None
+    
+    def show_diary_entries(self, entries, title):
+        """Display a list of diary entries"""
+        self.console.clear()
+        
+        if not entries:
+            self.console.print(f"[yellow]No {title.lower()} to display.[/yellow]")
+            Prompt.ask("\nPress Enter to continue")
+            return
+        
+        # Sort entries by timestamp (most recent first)
+        sorted_entries = sorted(entries, key=lambda x: x.timestamp, reverse=True)
+        
+        self.console.print(f"[bold cyan]{title}[/bold cyan]")
+        self.console.print(f"Total entries: {len(sorted_entries)}\n")
+        
+        # Create entries table
+        entries_table = Table()
+        entries_table.add_column("Date", style="cyan", width=8)
+        entries_table.add_column("Event", style="white", width=50)
+        entries_table.add_column("Priority", style="yellow", width=8)
+        
+        for entry in sorted_entries[:50]:  # Limit to 50 entries for display
+            priority_display = {
+                1: "Low",
+                2: "Medium", 
+                3: "High"
+            }.get(entry.priority, "Unknown")
+            
+            entries_table.add_row(
+                entry.timestamp.strftime("%m/%d"),
+                entry.get_display_summary(),
+                priority_display
+            )
+        
+        self.console.print(entries_table)
+        
+        if len(sorted_entries) > 50:
+            self.console.print(f"\n[dim]... and {len(sorted_entries) - 50} more entries[/dim]")
+        
+        Prompt.ask("\nPress Enter to continue")
     
     def trade_players(self):
         """Trade players"""
@@ -540,7 +924,7 @@ class SeasonMenu(BaseMenu):
                             'obp': obp,
                             'h': player.batting_stats.h,
                             'hr': player.batting_stats.hr,
-                            'rbi': player.batting_stats.h + player.batting_stats.bb,  # Simplified RBI calculation
+                            'rbi': player.batting_stats.rbi,
                             'bb': player.batting_stats.bb,
                             'k': player.batting_stats.k,
                             'ab': at_bats,

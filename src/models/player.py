@@ -202,17 +202,63 @@ class Player:
     team: Optional[str] = None
     age: int = 20  # Default age
     retired: bool = False  # Retirement status
+    archetype: Optional[str] = None  # Player archetype (Power Hitter, Crafty Pitcher, etc.)
     
-    # Core attributes (for simulation)
+    # Hitting attributes
+    power: int = 50
+    contact: int = 50
+    discipline: int = 50  # BB/K ratio
+    speed: int = 50
+
+    # Pitching attributes
     velocity: int = 50
+    movement: int = 50
     control: int = 50
     stamina: int = 50
-    speed_control: int = 50
-    
+    deception: int = 50
+    speed_control: int = 50  # Speed control for pitching
+
     # Fielding attributes
     range: int = 50
     arm_strength: int = 50
-    accuracy: int = 50
+    hands: int = 50  # error rate
+    reaction: int = 50
+    accuracy: int = 50  # backward compatibility
+    
+    # Mental and personality traits
+    potential: int = 50  # hidden rating that affects development
+    leadership: int = 50
+    work_ethic: int = 50
+    durability: int = 50
+    clutch: int = 50
+    composure: int = 50
+    
+    # Physical attributes
+    height: int = 70  # inches
+    weight: int = 180  # pounds
+    
+    # Advanced derived attributes (calculated properties)
+    @property
+    def batting_eye(self) -> int:
+        """Batting eye - combination of discipline and composure"""
+        return min(100, (self.discipline + self.composure) // 2)
+    
+    @property
+    def defensive_instincts(self) -> int:
+        """Defensive instincts - combination of reaction and leadership"""
+        return min(100, (self.reaction + self.leadership) // 2)
+    
+    @property
+    def pitcher_mentality(self) -> int:
+        """Pitcher mentality - combination of composure and leadership"""
+        return min(100, (self.composure + self.leadership) // 2)
+    
+    # Fatigue tracking
+    game_fatigue: float = 0.0  # Current game fatigue (0.0 to 1.0)
+    season_fatigue: float = 0.0  # Cumulative season fatigue (0.0 to 1.0)
+    rest_days: int = 0  # Days since last appearance
+    appearances_this_week: int = 0  # Appearances in the last 7 days
+    last_appearance_date: Optional[str] = None  # Track last game date
     
     # Current season stats (reset each season)
     batting_stats: BattingStats = field(default_factory=BattingStats)

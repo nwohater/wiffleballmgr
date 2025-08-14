@@ -118,4 +118,7 @@ TEAM_NAMES = {
         "Phoenix",
         "Dragon"
     ]
-} 
+}
+
+# NOTE: Probability constants have been moved to data/config/skill_model.yml
+# for easier designer configuration without code changes.

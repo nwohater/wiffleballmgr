@@ -5,6 +5,8 @@ import random
 from typing import List, Tuple, Optional
 from src.models.team import Team
 from src.models.player import Player, BattingStats, PitchingStats, FieldingStats
+from src.simulation.probability import AtBatProbabilityCalculator
+from src.utils.config_loader import get_skill_config
 
 class AtBatResult:
     """Result of a single at-bat"""
@@ -33,6 +35,7 @@ class GameSimulator:
         self.outs = 0
         self.bases: List[Optional[str]] = [None, None, None]  # 1B, 2B, 3B
         self.game_over = False
+        self.probability_calculator = AtBatProbabilityCalculator()
         
     def _simulate_full_game(self) -> Tuple[int, int]:
         """Simulate a complete MLW game with extra innings if tied"""
@@ -152,6 +155,10 @@ class GameSimulator:
         # Add innings pitched tracking (3 innings per MLW game)
         self.current_pitcher_home.pitching_stats.ip += 3.0
         self.current_pitcher_away.pitching_stats.ip += 3.0
+        
+        # Apply fatigue to pitchers
+        self.apply_fatigue(self.current_pitcher_home)
+        self.apply_fatigue(self.current_pitcher_away)
     
     def simulate_half_inning(self) -> int:
         """Simulate a half-inning and return runs scored"""
@@ -182,7 +189,12 @@ class GameSimulator:
                 if at_bat.outcome == "walk" or at_bat.outcome == "hbp":
                     additional_runs = self.count_runners_that_will_score(1)
                 elif at_bat.outcome == "hit":
-                    additional_runs = self.count_runners_that_will_score(at_bat.bases_advanced)
+                    # Credit RBIs only for bases that would have advanced without errors.
+                    # If a fielding error increased bases_advanced, don't credit extra RBIs for it.
+                    bases_for_rbi = at_bat.bases_advanced
+                    if 1 <= bases_for_rbi < 4 and "fielding error" in at_bat.details.lower():
+                        bases_for_rbi = max(1, bases_for_rbi - 1)
+                    additional_runs = self.count_runners_that_will_score(bases_for_rbi)
                 
                 # Update stats with RBI information
                 self.update_stats(at_bat, batter, pitcher, additional_runs)
@@ -193,8 +205,14 @@ class GameSimulator:
             
             # Update game state
             if at_bat.outcome == "hit":
+                # Always add any explicit runs from the at-bat result
                 runs_scored += at_bat.runs_scored
-                runs_scored += self.advance_runners(at_bat.bases_advanced)
+                # Home runs are fully accounted for by at_bat.runs_scored; do not advance runners again
+                if at_bat.bases_advanced == 4:
+                    # Clear the bases after a home run
+                    self.bases = [None, None, None]
+                else:
+                    runs_scored += self.advance_runners(at_bat.bases_advanced)
             elif at_bat.outcome == "walk":
                 runs_scored += self.advance_runners(1)
             elif at_bat.outcome == "hbp":
@@ -216,68 +234,101 @@ class GameSimulator:
             pitcher.pitching_stats.er += runs_scored  # Simplified: all runs are earned
         
         return runs_scored
+
+    def apply_fatigue(self, player: Player):
+        """Calculate and apply fatigue to the player's stats based on performance and rest days"""
+        config = get_skill_config()
+        fatigue_config = config.fatigue
+        
+        # Calculate game fatigue based on innings pitched
+        game_fatigue_factor = fatigue_config.get('game_fatigue_factor', 0.05)
+        player.game_fatigue += player.pitching_stats.ip * game_fatigue_factor
+
+        # Limit game fatigue to 1.0 (100%)
+        player.game_fatigue = min(player.game_fatigue, 1.0)
+
+        # Temporarily lower stamina based on game fatigue
+        fatigue_penalty = player.game_fatigue * 0.2 * player.stamina
+        player.stamina = max(1, player.stamina - int(fatigue_penalty))
+
+        # Increase cumulative season fatigue and limit it
+        player.season_fatigue += player.game_fatigue * 0.5
+        player.season_fatigue = min(player.season_fatigue, 1.0)
+
+        # Reset game fatigue once applied to season fatigue
+        player.game_fatigue = 0.0
+
+        # Adjust fatigue recovery on rest days
+        if player.rest_days > 0:
+            recovery_rate_per_day = fatigue_config.get('fatigue_recovery_rate_per_day', 0.2)
+            recovery_rate = player.rest_days * recovery_rate_per_day / 7.0  # Scale by days per week
+            player.season_fatigue *= (1.0 - recovery_rate)
+
+        player.rest_days = 0  # Reset rest days after fatigue application
     
     def simulate_at_bat(self, batter: Player, pitcher: Player) -> AtBatResult:
-        """Simulate a single at-bat using player skills"""
-        # Speed limit check (75 mph)
+        """Simulate a single at-bat using logistic probability approach"""
+        # Speed limit check (75 mph) - MLW rule enforcement
         if pitcher.velocity > 75:
-            # Automatic ball for exceeding speed limit
             return AtBatResult("walk", "Speed limit violation - automatic ball")
         
-        # Calculate skill-based probabilities
-        pitcher_control = pitcher.control / 100.0
-        pitcher_velocity = pitcher.velocity / 100.0
-        batter_contact = (batter.velocity + batter.control) / 200.0  # Using existing attributes for contact
+        # Determine situational context
+        situation = None
+        if self.inning >= 3 and abs(self.home_score - self.away_score) <= 1:
+            situation = "clutch"
+        elif pitcher.pitching_stats.pt > 60:  # High pitch count
+            situation = "fatigue"
+        elif pitcher.velocity >= 70:  # Close to speed limit
+            situation = "speed_limit_pressure"
         
-        # Base probabilities that get modified by skills
-        base_walk = 0.08
-        base_hbp = 0.02
-        base_strikeout = 0.25
-        base_out = 0.50
-        base_hit = 0.15
+        # Use probability calculator to determine outcome
+        outcome, details, extra_info = self.probability_calculator.determine_at_bat_outcome(
+            pitcher, batter, situation
+        )
         
-        # Modify based on pitcher control (better control = fewer walks, more strikeouts)
-        control_modifier = (pitcher_control - 0.5) * 0.3  # ±15% max
-        base_walk = max(0.02, base_walk - control_modifier)
-        base_strikeout = min(0.45, base_strikeout + control_modifier * 0.5)
-        
-        # Modify based on batter contact (better contact = fewer strikeouts, more hits)
-        contact_modifier = (batter_contact - 0.5) * 0.2  # ±10% max
-        base_strikeout = max(0.15, base_strikeout - contact_modifier)
-        base_hit = min(0.25, base_hit + contact_modifier * 0.3)
-        
-        # Clamp hit probability
-        base_hit = min(0.20, max(0.05, base_hit))
-        # Clamp walk probability
-        base_walk = min(0.12, max(0.02, base_walk))
-        # Clamp strikeout probability
-        base_strikeout = min(0.40, max(0.15, base_strikeout))
-        # Now, force out probability to be at least 0.35
-        base_out = 1.0 - base_walk - base_hbp - base_strikeout - base_hit
-        if base_out < 0.35:
-            # Reduce hit and walk to make room for outs
-            needed = 0.35 - base_out
-            base_hit = max(0.05, base_hit - needed * 0.5)
-            base_walk = max(0.02, base_walk - needed * 0.5)
-            base_out = 1.0 - base_walk - base_hbp - base_strikeout - base_hit
-        
-        # Determine outcome based on skill-modified probabilities
-        rand = random.random()
-        if rand < base_walk:
-            return AtBatResult("walk", "Walk")
-        elif rand < base_walk + base_hbp:
+        # Handle HBP separately (not included in logistic model)
+        if random.random() < 0.02:  # 2% base HBP rate
             return AtBatResult("hbp", "Hit by pitch")
-        elif rand < base_walk + base_hbp + base_strikeout:
-            return AtBatResult("strikeout", "Strikeout")
-        elif rand < base_walk + base_hbp + base_strikeout + base_out:
-            return self.perform_fielding_check(batter, "ground_ball")
+        
+        # Create AtBatResult based on outcome
+        if outcome == "strikeout":
+            return AtBatResult("strikeout", details)
+        elif outcome == "walk":
+            return AtBatResult("walk", details)
+        elif outcome == "hit":
+            bases_advanced = extra_info.get("bases_advanced", 1)
+            runs_scored = extra_info.get("runs_scored", 0)
+            
+            # For home runs, calculate runs scored including runners on base
+            if bases_advanced == 4:
+                runs_scored = self.count_runners() + 1
+            
+            # Apply fielding check for non-HR hits
+            if bases_advanced < 4:
+                play_type = self._get_play_type(bases_advanced)
+                hit_result = AtBatResult("hit", details, runs_scored, 0, bases_advanced)
+                return self.perform_fielding_check(batter, play_type, hit_result)
+            else:
+                return AtBatResult("hit", details, runs_scored, 0, bases_advanced)
         else:
-            return self.determine_hit_type(batter, pitcher)
+            # "out" outcome - apply fielding check
+            return self.perform_fielding_check(batter, "ground_ball")
+    
+    def _get_play_type(self, bases_advanced: int) -> str:
+        """Determine play type based on bases advanced for fielding check"""
+        if bases_advanced == 1:
+            return "ground_ball"
+        elif bases_advanced == 2:
+            return "line_drive"
+        elif bases_advanced == 3:
+            return "fly_ball"
+        else:
+            return "ground_ball"
     
     def determine_hit_type(self, batter: Player, pitcher: Player) -> AtBatResult:
         """Determine the type of hit based on player attributes"""
         # Calculate power based on batter attributes
-        power = (batter.velocity + batter.control) / 200.0
+        power = batter.power / 100.0
         
         rand = random.random()
         
@@ -311,28 +362,32 @@ class GameSimulator:
         return runs
     
     def advance_runners(self, bases: int):
-        """Advance runners on base and return runs scored"""
+        """Advance runners on base with strict advancement and return runs scored.
+        Singles move each runner 1 base, doubles 2, triples 3. HR handled upstream.
+        """
         runs_scored = 0
         new_bases: List[Optional[str]] = [None, None, None]
-        
-        # Move existing runners
-        for i, runner in enumerate(self.bases):
-            if runner is not None:
-                new_pos = i + bases
-                if new_pos >= 3:
-                    # Runner scores
-                    runs_scored += 1
-                else:
-                    new_bases[new_pos] = runner
-        
-        # Place new batter on the appropriate base
-        if bases >= 1:
-            batter_base = min(bases - 1, 2)  # Convert to 0-indexed, max at 2nd base (index 2)
-            if bases == 4:  # Home run - batter scores, doesn't occupy a base
+
+        # Move existing runners strictly by bases
+        for i in reversed(range(3)):
+            runner = self.bases[i]
+            if runner is None:
+                continue
+            new_pos = i + bases
+            if new_pos >= 3:
                 runs_scored += 1
             else:
-                new_bases[batter_base] = "batter"  # Placeholder for actual batter
-        
+                new_bases[new_pos] = runner
+
+        # Place batter
+        if bases == 1:
+            new_bases[0] = "batter"
+        elif bases == 2:
+            new_bases[1] = "batter"
+        elif bases == 3:
+            new_bases[2] = "batter"
+        # bases==4 handled before calling
+
         self.bases = new_bases
         return runs_scored
     
@@ -466,11 +521,8 @@ class GameSimulator:
                 if random.random() < 0.3:  # 30% chance of fielding error
                     worst_fielder = min(fielders, key=lambda p: getattr(p, 'accuracy', 50))
                     worst_fielder.fielding_stats.e += 1
-                    
-                    # Advance runners one extra base on error
-                    if hit_result.bases_advanced < 4:
-                        hit_result.bases_advanced += 1
-                        hit_result.details += " (fielding error)"
+                    # Record the error but do not alter base advancement; keep strict advancement rules
+                    hit_result.details += " (fielding error)"
                 
                 return hit_result
             else:

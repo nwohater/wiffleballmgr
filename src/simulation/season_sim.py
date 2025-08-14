@@ -1,14 +1,33 @@
 """
 Season simulation for Wiffle Ball Manager (MLW rules)
 """
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from models.team import Team
+from simulation.advanced_stats import AdvancedStatsCalculator
 from models.game import Game, GameResult
 from models.player import Player, BattingStats, PitchingStats
 from simulation.game_sim import GameSimulator
+from simulation.season_diary import SeasonDiary
 import random
 
 class SeasonSimulator:
+    def __init__(self, teams: List[Team], current_season: int = 1):
+        self.teams = teams
+        self.current_season = current_season
+        self.advanced_stats_calculator = AdvancedStatsCalculator()
+
+    def calculate_league_context(self):
+        """Calculate the league context for advanced stats calculations"""
+        return self.advanced_stats_calculator.calculate_league_context(self.teams)
+
+    def calculate_player_advanced_stats(self, player: Player, league_context):
+        """Calculate and set the player's advanced statistics"""
+        batting_advanced, pitching_advanced, fielding_advanced, war = \
+            self.advanced_stats_calculator.calculate_all_advanced_stats(player, league_context)
+        player.batting_advanced_stats = batting_advanced
+        player.pitching_advanced_stats = pitching_advanced
+        player.fielding_advanced_stats = fielding_advanced
+        player.war = war
     def __init__(self, teams: List[Team], games_per_season: int = 15, innings_per_game: int = 3, current_season: int = 1):
         self.teams = teams
         self.games_per_season = games_per_season
@@ -19,6 +38,8 @@ class SeasonSimulator:
         self.results: List[dict] = []
         # Track pitcher usage for regular season series
         self.series_pitcher_usage: Dict[str, Dict[str, int]] = {}  # series_id -> {player_id -> games_pitched}
+        # Season diary for logging events
+        self.season_diary = SeasonDiary(current_season)
 
     def generate_schedule(self):
         """Generate a triple round-robin schedule: each team plays every other team 3 times."""
@@ -130,6 +151,14 @@ class SeasonSimulator:
                 
                 if result:
                     self.results.append(result)
+                    # Log game result to diary
+                    self.season_diary.log_game_result(
+                        result.get('home_team', home_team),
+                        result.get('away_team', away_team),
+                        result.get('home_score', 0),
+                        result.get('away_score', 0),
+                        game_id=f"game_{len(self.results)}"
+                    )
             
             # Show series pitcher usage summary
             print(f"  Series {series_num} pitcher usage:")
@@ -186,6 +215,9 @@ class SeasonSimulator:
         champion = self.play_series(final_teams[0], final_teams[1], best_of=7, series_name="Championship")
         
         print(f"\n🏆 CHAMPION: {champion.name} 🏆")
+        
+        # Log championship to diary
+        self.season_diary.log_season_end(champion.name, self.teams)
 
     def play_series(self, team1: Team, team2: Team, best_of: int, series_name: str = "Series"):
         """Play a best-of-N series between two teams (no pitcher restrictions in playoffs)."""
@@ -266,8 +298,8 @@ class SeasonSimulator:
                 at_bats = player.batting_stats.h + player.batting_stats.k  # hits + strikeouts
                 if at_bats >= 33:
                     avg = player.batting_stats.h / at_bats if at_bats > 0 else 0.0
-                    # Calculate RBI (simplified: hits + walks)
-                    rbi = player.batting_stats.h + player.batting_stats.bb
+                    # Use actual tracked RBIs
+                    rbi = player.batting_stats.rbi
                     qualified_hitters.append({
                         'player': player,
                         'team': next((team.name for team in self.teams if player in team.get_all_players()), 'Unknown'),
@@ -490,13 +522,28 @@ class SeasonSimulator:
                 team.add_player(rookie, active=False)  # Add to reserve by default
                 print(f"{team.name} selects rookie {rookie.name} [{rookie_type}] {ratings}")
 
+    def select_pitcher(self, team: Team) -> Optional[Player]:
+        """Selects the most appropriate pitcher considering fatigue."""
+        # Sort pitchers by lowest combined fatigue
+        pitchers = sorted(
+            [p for p in team.active_roster if p.pitching_stats],
+            key=lambda p: (p.season_fatigue + p.game_fatigue, -p.stamina)
+        )
+
+        # Select the pitcher with the lowest fatigue
+        for pitcher in pitchers:
+            if pitcher.season_fatigue + pitcher.game_fatigue < 0.7:  # Threshold for allowing player to pitch
+                return pitcher
+
+        return None  # No available pitcher without high fatigue
+
     def generate_realistic_rookie(self):
         """Generate a rookie as hitter-only, pitcher-only, or two-way, with appropriate attributes."""
         first_names = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Drew", "Skyler"]
         last_names = ["Smith", "Johnson", "Lee", "Brown", "Garcia", "Martinez", "Davis", "Clark"]
         name = f"{random.choice(first_names)} {random.choice(last_names)}"
         rookie_type = random.choices(
-            ["Hitter-only", "Pitcher-only", "Two-way"],
+            ["Hitter-only", "Pitcher-only", "Two-way", "Glove-First"],
             weights=[0.4, 0.3, 0.3],
             k=1
         )[0]
@@ -509,6 +556,7 @@ class SeasonSimulator:
             batting.k = random.randint(5, 15)
             rookie = Player(
                 name=name,
+                archetype="Power Hitter",
                 velocity=random.randint(30, 50),
                 control=random.randint(30, 50),
                 stamina=random.randint(30, 50),
@@ -526,6 +574,7 @@ class SeasonSimulator:
             pitching.bb = random.randint(2, 8)
             rookie = Player(
                 name=name,
+                archetype="Crafty Pitcher",
                 velocity=random.randint(60, 80),
                 control=random.randint(60, 80),
                 stamina=random.randint(60, 80),
@@ -547,6 +596,7 @@ class SeasonSimulator:
             pitching.bb = random.randint(3, 10)
             rookie = Player(
                 name=name,
+                archetype="Two-Way",
                 velocity=random.randint(50, 70),
                 control=random.randint(50, 70),
                 stamina=random.randint(50, 70),
@@ -892,11 +942,17 @@ class SeasonSimulator:
         """Apply player development for the upcoming season"""
         from simulation.player_dev import PlayerDevelopment
         
-        player_dev = PlayerDevelopment()
+        # Create a new diary for the upcoming season
+        next_season_diary = SeasonDiary(self.current_season + 1)
+        player_dev = PlayerDevelopment(season_diary=next_season_diary)
+        
         for team in self.teams:
             players = team.get_all_players()
             if players:
                 player_dev.develop_players(players)
+        
+        # Update the season diary for the new season
+        self.season_diary = next_season_diary
     
     def reset_team_records(self):
         """Reset team win/loss records for new season"""

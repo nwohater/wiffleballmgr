@@ -1,0 +1,86 @@
+# Skill model configuration
+
+probability_factors:
+  # Base factors for each outcome type
+  STRIKEOUT_FACTOR: 3.2
+  WALK_FACTOR: 2.0
+  HIT_FACTOR: 2.2
+  HOMERUN_FACTOR: 3.5
+  EXTRABASE_FACTOR: 3.5
+  
+  # Pitcher attribute weights
+  PITCHER_VELOCITY_WEIGHT: 0.4
+  PITCHER_MOVEMENT_WEIGHT: 0.3
+  PITCHER_CONTROL_WEIGHT: 0.3
+  PITCHER_DECEPTION_WEIGHT: 0.2
+  
+  # Hitter attribute weights
+  HITTER_CONTACT_WEIGHT: 0.5
+  HITTER_DISCIPLINE_WEIGHT: 0.5
+  HITTER_POWER_WEIGHT: 0.6
+  HITTER_SPEED_WEIGHT: 0.2
+  
+  # Base probability adjustments (applied before sigmoid)
+  BASE_STRIKEOUT_ADJUSTMENT: 0.1
+  BASE_WALK_ADJUSTMENT: -1.0
+  BASE_HIT_ADJUSTMENT: -1.1
+  BASE_HOMERUN_ADJUSTMENT: -3.0
+  BASE_EXTRABASE_ADJUSTMENT: -1.0
+  
+  # Situational modifiers
+  CLUTCH_MODIFIER: 0.1
+  FATIGUE_MODIFIER: -0.2
+  WEATHER_MODIFIER_RANGE: 0.15
+
+hit_type_weights:
+  SINGLE_WEIGHT: 0.72
+  DOUBLE_WEIGHT: 0.18
+  TRIPLE_WEIGHT: 0.04
+  HOMERUN_WEIGHT: 0.06
+  
+  # Power thresholds for hit types
+  HOMERUN_POWER_THRESHOLD: 60
+  EXTRABASE_POWER_THRESHOLD: 50
+  POWER_SCALING_FACTOR: 0.8
+
+player_development:
+  peak_age: 25
+  decline_start: 30
+  retirement_age: 40
+  
+fatigue:
+  game_fatigue_factor: 0.05
+  fatigue_recovery_rate_per_day: 0.2
+
+# Event odds and effects
+positive_event_chance: 0.12
+negative_event_chance: 0.08
+
+# Additional game balance parameters
+game_balance:
+  hbp_base_rate: 0.02  # 2% chance of hit-by-pitch
+  fielding_check_chances:
+    ground_ball: 0.30    # 30% of ground balls involve fielding checks
+    fly_ball: 0.40       # 40% of fly balls involve fielding checks
+    line_drive: 0.25     # 25% of line drives involve fielding checks
+  fielding_error_chance: 0.10  # 10% chance of error on failed fielding attempt
+  
+# Aging and development curves
+development_curves:
+  max_attribute_change: 6      # Maximum attribute change per season
+  retirement_chance_over_age: 0.30  # 30% chance to retire at retirement age
+  young_player_growth_chance: 0.30  # 30% chance for growth under peak age
+  
+# Experience-based development
+experience_thresholds:
+  batting:
+    high_experience_games: 21    # Games needed for high batting experience
+    high_experience_pa: 70       # Plate appearances for high experience
+    moderate_experience_games: 12 # Games for moderate experience
+    moderate_experience_pa: 40    # PA for moderate experience
+  pitching:
+    high_experience_games: 18    # Games needed for high pitching experience
+    high_experience_ip: 50       # Innings pitched for high experience
+    moderate_experience_games: 10 # Games for moderate experience
+    moderate_experience_ip: 30    # IP for moderate experience
+

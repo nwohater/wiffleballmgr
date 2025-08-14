@@ -3,15 +3,48 @@ Player development and aging system for Wiffle Ball Manager
 """
 import random
 from typing import List
-from models.player import Player, BattingStats, PitchingStats
+from src.models.player import Player, BattingStats, PitchingStats
+from src.simulation.development_events import DevelopmentEventSystem
+from src.simulation.season_diary import SeasonDiary
+from src.utils.config_loader import get_skill_config
+
+class RookieArchetype:
+    """Define different archetypes for rookie players, affecting development and strategy."""
+    ARCHETYPES = {
+        "Power Hitter": {
+            "focus": ["power", "contact"],
+            "development_rate": {"power": 1.2, "contact": 1.1}
+        },
+        "Crafty Pitcher": {
+            "focus": ["control", "deception"],
+            "development_rate": {"control": 1.3, "deception": 1.2}
+        },
+        "Two-Way": {
+            "focus": ["power", "control"],
+            "development_rate": {"power": 1.0, "control": 1.0}
+        },
+        "Glove-First": {
+            "focus": ["fielding", "arm_strength"],
+            "development_rate": {"fielding": 1.3, "arm_strength": 1.1}
+        }
+    }
+
+    @staticmethod
+    def get_archetype_effects(archetype_name):
+        return RookieArchetype.ARCHETYPES.get(archetype_name, {})
+
 
 class PlayerDevelopment:
     """Handles player development, aging, and skill progression"""
     
-    def __init__(self):
-        self.peak_age = 25  # Peak performance age
-        self.decline_start = 30  # Age when decline begins
-        self.retirement_age = 40  # Age when players retire
+    def __init__(self, season_diary: SeasonDiary = None):
+        config = get_skill_config()
+        dev_config = config.player_development
+        self.peak_age = dev_config.get('peak_age', 25)  # Peak performance age
+        self.decline_start = dev_config.get('decline_start', 30)  # Age when decline begins
+        self.retirement_age = dev_config.get('retirement_age', 40)  # Age when players retire
+        self.development_events = DevelopmentEventSystem()
+        self.season_diary = season_diary
         
     def develop_players(self, players: List[Player]):
         """Develop all players in a list (called at end of season)"""
@@ -42,17 +75,107 @@ class PlayerDevelopment:
         # Random development events
         self.random_development_events(player)
     
+    def calculate_age_curve_multiplier(self, player: Player) -> float:
+        """Calculate bell curve multiplier based on age, centered at peak_age"""
+        # Bell curve parameters
+        age_diff = player.age - self.peak_age
+        variance = (10.0) ** 2  # Controls width of the bell curve
+        
+        # Bell curve formula: e^(-(x-μ)²/(2σ²))
+        import math
+        curve_value = math.exp(-(age_diff ** 2) / (2 * variance))
+        
+        # Scale to make it useful for development: -1 to +1 range
+        # Young players get bonus, old players get penalty
+        if player.age < self.peak_age:
+            return curve_value * 0.5  # Positive development for young players
+        elif player.age > self.decline_start:
+            return -curve_value * 0.8  # Negative development for aging players
+        else:
+            return curve_value * 0.2  # Minimal change at peak
+    
+    def calculate_attribute_change(self, player: Player, attribute: str) -> int:
+        """Calculate attribute change based on age, potential, usage, and coach quality"""
+        MAX_ATTRIBUTE_CHANGE = 6
+        
+        # Age-based development curve
+        age_multiplier = self.calculate_age_curve_multiplier(player)
+        
+        # Usage factor (experience from playing)
+        usage_factor = (self.calculate_batting_experience(player) + 
+                       self.calculate_pitching_experience(player)) / 2
+        
+        # Potential factor (higher potential = more development)
+        potential_factor = (player.potential - 50) / 50  # Range: -1 to +1
+        
+        # Personality traits affect development
+        work_ethic_factor = (player.work_ethic - 50) / 100  # Range: -0.5 to +0.5
+        leadership_factor = (player.leadership - 50) / 200  # Range: -0.25 to +0.25
+        
+        # Coach quality from team (affects development rate)
+        coach_quality_factor = self.get_coach_quality_factor(player)
+        
+        # Combine all factors
+        total_factor = (
+            age_multiplier * 0.4 +
+            potential_factor * 0.3 +
+            usage_factor * 0.2 +
+            work_ethic_factor * 0.1
+        ) * coach_quality_factor
+        
+        # Add some randomness
+        import random
+        random_factor = random.uniform(-0.2, 0.2)
+        total_factor += random_factor
+        
+        # Calculate raw change (before capping)
+        raw_change = total_factor * MAX_ATTRIBUTE_CHANGE
+        
+        # Cap change to ±6
+        return max(-MAX_ATTRIBUTE_CHANGE, min(MAX_ATTRIBUTE_CHANGE, int(raw_change)))
+    
+    def get_coach_quality_factor(self, player: Player) -> float:
+        """Get coach quality factor from player's team"""
+        # Try to find the team and get coach quality
+        # Note: This requires access to team data, which may need to be passed to the method
+        # For now, return a default value but this should be updated when team data is available
+        
+        # TODO: This should be updated to receive team data or be called from a higher level
+        # that has access to both players and teams
+        default_coach_quality = 50  # Average coach quality
+        coach_quality_factor = (default_coach_quality - 50) / 50 + 1.0  # Range: 0.0 to 2.0, centered at 1.0
+        
+        return max(0.5, min(1.5, coach_quality_factor))  # Cap between 0.5x and 1.5x development
+
     def calculate_experience_bonus(self, player: Player):
         """Calculate development bonus based on playing time and experience"""
+        # Apply the new age & usage-based development system
+        batting_attributes = ['power', 'contact', 'discipline', 'speed']
+        pitching_attributes = ['velocity', 'movement', 'control', 'stamina', 'deception']
+        fielding_attributes = ['range', 'arm_strength', 'hands', 'reaction']
+        
+        # Apply age & usage-based changes to all attributes
+        all_attributes = batting_attributes + pitching_attributes + fielding_attributes
+        for attr in all_attributes:
+            if hasattr(player, attr):
+                change = self.calculate_attribute_change(player, attr)
+                if change != 0:
+                    current_value = getattr(player, attr, 50)
+                    new_value = max(1, min(100, current_value + change))
+                    setattr(player, attr, new_value)
+                    if abs(change) > 2:  # Only print significant changes
+                        print(f"{player.name}: {attr} {'improved' if change > 0 else 'declined'} by {abs(change)} points")
+        
+        # Legacy development system (reduced impact)
         batting_experience = self.calculate_batting_experience(player)
         pitching_experience = self.calculate_pitching_experience(player)
         
-        # Apply batting development based on experience
-        if batting_experience > 0:
+        # Apply smaller legacy batting development
+        if batting_experience > 0.5:  # Only for significant experience
             self.apply_batting_development(player, batting_experience)
         
-        # Apply pitching development based on experience
-        if pitching_experience > 0:
+        # Apply smaller legacy pitching development  
+        if pitching_experience > 0.5:  # Only for significant experience
             self.apply_pitching_development(player, pitching_experience)
     
     def calculate_batting_experience(self, player: Player) -> float:
@@ -170,20 +293,31 @@ class PlayerDevelopment:
                 self.improve_attribute(player, 'speed_control', -1, 0)
     
     def random_development_events(self, player: Player):
-        """Random development events that can occur (reduced frequency since experience is primary)"""
-        events = [
-            ("Training breakthrough", 0.02, lambda p: self.improve_attribute(p, 'velocity', 2, 4)),
-            ("Control workshop", 0.02, lambda p: self.improve_attribute(p, 'control', 2, 4)),
-            ("Conditioning program", 0.02, lambda p: self.improve_attribute(p, 'stamina', 2, 4)),
-            ("Technique refinement", 0.02, lambda p: self.improve_attribute(p, 'speed_control', 2, 4)),
-            ("Minor injury", 0.015, lambda p: self.improve_attribute(p, 'velocity', -2, -1)),
-            ("Mechanics issue", 0.015, lambda p: self.improve_attribute(p, 'control', -2, -1)),
-        ]
+        """Enhanced random development events using the weighted system"""
+        config = get_skill_config()
+        # Use the enhanced development events system
+        events_occurred = self.development_events.process_player_events(
+            player, 
+            season_diary=self.season_diary,
+            positive_chance=config.positive_event_chance,
+            negative_chance=config.negative_event_chance
+        )
         
-        for event_name, chance, effect in events:
-            if random.random() < chance:
-                effect(player)
-                print(f"{player.name}: {event_name}")
+        # Print events for console output (keeping existing behavior)
+        for event in events_occurred:
+            # Get the changes that were actually made from the event application
+            changes_made = {}
+            # Re-apply the event to get the changes (but don't modify the player again)
+            for attribute, (min_change, max_change) in event.attribute_changes.items():
+                if hasattr(player, attribute):
+                    # Calculate what the change would be (for display purposes)
+                    import random
+                    random.seed(hash(player.name + event.name))  # Consistent seed for display
+                    change = random.randint(min_change, max_change)
+                    changes_made[attribute] = change
+            
+            summary = self.development_events.get_event_summary(event, changes_made)
+            print(f"{player.name}: {summary}")
     
     def improve_attribute(self, player: Player, attr: str, min_change: int, max_change: int):
         """Improve a player attribute within bounds"""

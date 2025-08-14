@@ -59,46 +59,71 @@ class TeamManagementUI:
         """Display team roster with player stats"""
         self.console.clear()
         
-        # Create roster table
-        table = Table(title=f"{team.name} Roster")
-        table.add_column("#", style=COLORS["SUBTITLE"])
-        table.add_column("Name", style=COLORS["HIGHLIGHT"])
-        table.add_column("Age", style=COLORS["INFO"])
-        table.add_column("V", style=COLORS["INFO"])
-        table.add_column("C", style=COLORS["INFO"])
-        table.add_column("S", style=COLORS["INFO"])
-        table.add_column("SC", style=COLORS["INFO"])
-        table.add_column("R", style=COLORS["SUCCESS"])
-        table.add_column("AS", style=COLORS["SUCCESS"])
-        table.add_column("A", style=COLORS["SUCCESS"])
-        table.add_column("AVG", style=COLORS["INFO"])
-        table.add_column("ERA", style=COLORS["INFO"])
-        table.add_column("FPCT", style=COLORS["SUCCESS"])
-        table.add_column("Status", style=COLORS["SUBTITLE"])
+        # Decide between full or compact layout based on terminal width
+        available_width = getattr(self.console, "width", 120) or 120
+        compact_layout = available_width < 120
+
+        # Create roster table with key attributes only
+        table = Table(title=f"{team.name} Roster", expand=True)
+        table.add_column("#", style=COLORS["SUBTITLE"], width=3, min_width=2, justify="right", no_wrap=True)
+        table.add_column("Name", style=COLORS["HIGHLIGHT"], width=16 if compact_layout else 20, min_width=12, overflow="fold")
+
+        if compact_layout:
+            # Compact: fewer columns so data doesn't truncate
+            table.add_column("PWR", style=COLORS["INFO"], width=4, min_width=3, justify="right", no_wrap=True)
+            table.add_column("CON", style=COLORS["INFO"], width=4, min_width=3, justify="right", no_wrap=True)
+            table.add_column("VEL", style=COLORS["INFO"], width=4, min_width=3, justify="right", no_wrap=True)
+            table.add_column("CTL", style=COLORS["INFO"], width=4, min_width=3, justify="right", no_wrap=True)
+        else:
+            # Full layout
+            table.add_column("PWR", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("CON", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("SPD", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("VEL", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("CTL", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("STA", style=COLORS["INFO"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("RNG", style=COLORS["SUCCESS"], width=5, min_width=3, justify="right", no_wrap=True)
+            table.add_column("ARM", style=COLORS["SUCCESS"], width=5, min_width=3, justify="right", no_wrap=True)
+
+        # Stats (always shown)
+        table.add_column("AVG", style=COLORS["INFO"], width=6, min_width=5, justify="right", no_wrap=True)
+        table.add_column("ERA", style=COLORS["INFO"], width=6, min_width=5, justify="right", no_wrap=True)
+        table.add_column("Status", style=COLORS["SUBTITLE"], width=9 if compact_layout else 10, min_width=7, overflow="fold")
         
         # Add active players
         player_num = 1
         for player in team.active_roster:
             avg = f"{player.batting_stats.avg:.3f}" if player.batting_stats.ab > 0 else "N/A"
             era = f"{player.pitching_stats.era:.2f}" if player.pitching_stats.ip > 0 else "N/A"
-            fpct = f"{player.fielding_stats.calc_fpct:.3f}" if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0 else "N/A"
             
-            table.add_row(
-                str(player_num),
-                player.name,
-                str(player.age),
-                str(player.velocity),
-                str(player.control),
-                str(player.stamina),
-                str(player.speed_control),
-                str(player.range),
-                str(player.arm_strength),
-                str(player.accuracy),
-                avg,
-                era,
-                fpct,
-                "Active"
-            )
+            if compact_layout:
+                table.add_row(
+                    str(player_num),
+                    player.name,
+                    str(player.power),
+                    str(player.contact),
+                    str(player.velocity),
+                    str(player.control),
+                    avg,
+                    era,
+                    "Active"
+                )
+            else:
+                table.add_row(
+                    str(player_num),
+                    player.name,
+                    str(player.power),
+                    str(player.contact),
+                    str(player.speed),
+                    str(player.velocity),
+                    str(player.control),
+                    str(player.stamina),
+                    str(player.range),
+                    str(player.arm_strength),
+                    avg,
+                    era,
+                    "Active"
+                )
             player_num += 1
         
         # Add reserve players if requested
@@ -106,27 +131,46 @@ class TeamManagementUI:
             for player in team.reserve_roster:
                 avg = f"{player.batting_stats.avg:.3f}" if player.batting_stats.ab > 0 else "N/A"
                 era = f"{player.pitching_stats.era:.2f}" if player.pitching_stats.ip > 0 else "N/A"
-                fpct = f"{player.fielding_stats.calc_fpct:.3f}" if (player.fielding_stats.po + player.fielding_stats.a + player.fielding_stats.e) > 0 else "N/A"
                 
-                table.add_row(
-                    str(player_num),
-                    player.name,
-                    str(player.age),
-                    str(player.velocity),
-                    str(player.control),
-                    str(player.stamina),
-                    str(player.speed_control),
-                    str(player.range),
-                    str(player.arm_strength),
-                    str(player.accuracy),
-                    avg,
-                    era,
-                    fpct,
-                    "Reserve"
-                )
+                if compact_layout:
+                    table.add_row(
+                        str(player_num),
+                        player.name,
+                        str(player.power),
+                        str(player.contact),
+                        str(player.velocity),
+                        str(player.control),
+                        avg,
+                        era,
+                        "Reserve"
+                    )
+                else:
+                    table.add_row(
+                        str(player_num),
+                        player.name,
+                        str(player.power),
+                        str(player.contact),
+                        str(player.speed),
+                        str(player.velocity),
+                        str(player.control),
+                        str(player.stamina),
+                        str(player.range),
+                        str(player.arm_strength),
+                        avg,
+                        era,
+                        "Reserve"
+                    )
                 player_num += 1
         
         self.console.print(table)
+        
+        # Show legend
+        legend = Panel(
+            "PWR=Power, CON=Contact, SPD=Speed, VEL=Velocity, CTL=Control, STA=Stamina, RNG=Range, ARM=Arm Strength",
+            title="Legend",
+            border_style=COLORS["INFO"]
+        )
+        self.console.print(legend)
     
     def show_player_details(self, player: Player, current_season: Optional[int] = None):
         """Display detailed player information with career stats grid"""
@@ -203,7 +247,7 @@ class TeamManagementUI:
         if not seasons:
             return
         
-        self.console.print(f"\n[bold {COLORS['TITLE']}]CAREER STATISTICS[/bold {COLORS['TITLE']}]")
+        self.console.print(f"\n[{COLORS['TITLE']}]CAREER STATISTICS[/]")
         
         # Batting Stats Grid
         has_batting_stats = any(
@@ -375,7 +419,7 @@ class TeamManagementUI:
     
     def show_current_season_stats(self, player: Player):
         """Show current season stats panels"""
-        self.console.print(f"\n[bold {COLORS['WARNING']}]CURRENT SEASON STATS[/bold {COLORS['WARNING']}]")
+        self.console.print(f"\n[{COLORS['WARNING']}]CURRENT SEASON STATS[/]")
         
         # Current season batting stats
         if player.batting_stats.ab > 0:
